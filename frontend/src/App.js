@@ -40,7 +40,6 @@ function AppRoutes() {
       <Route path="/approvals" element={<Protected><Approvals /></Protected>} />
       <Route path="/time" element={<Protected><TimeTracker /></Protected>} />
       <Route path="/clients" element={<Protected><Clients /></Protected>} />
-      <Route path="/invoices" element={<Navigate to="/dashboard" replace />} />
       <Route path="/kpi" element={<Protected><KPI /></Protected>} />
       <Route path="/sop" element={<Protected><SOPs /></Protected>} />
       <Route path="/reports" element={<Protected managerOnly><Reports /></Protected>} />

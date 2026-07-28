@@ -145,7 +145,7 @@ export default function Layout({ children }) {
           <Search size={14} className="text-slate-400" />
           <input
             data-testid="global-search"
-            placeholder="Search jobs, clients, invoices…"
+            placeholder="Search jobs, clients…"
             className="bg-transparent outline-none text-[13px] placeholder:text-slate-400 flex-1"
           />
         </div>

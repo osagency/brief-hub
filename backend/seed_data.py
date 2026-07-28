@@ -49,8 +49,6 @@ JOBS = [
     {"id": "OS-012", "title": "SmartCo LinkedIn Ads Refresh", "client": "smartco", "priority": "medium", "status": "active", "due": _days(4), "progress": 45, "team": ["mktg", "designer"], "recurring": "none", "desc": "New LinkedIn ad creatives + audience refresh.", "hours": 6, "revisions": 0, "scopeAdded": 0, "comments": [], "assignees": ["u_kavya", "u_priya"]},
 ]
 
-INVOICES = []  # deprecated: invoice section removed from app
-
 KPI = [
     {"id": str(uuid.uuid4()), "memberId": "u_priya", "period": "monthly", "periodLabel": "Jan 2026", "jobsDone": 14, "onTime": 92, "quality": 9.3, "csat": 9.1, "deadline": 9.2, "comm": 8.8, "initiative": 9.0, "collab": 9.4, "good": "Exceptional turnaround on the Galalite carousel work. Clients specifically praised design polish.", "improve": "Push back earlier on scope creep instead of absorbing extra revisions silently.", "actions": ["Flag scope creep same-day", "Share design refs with writer earlier"], "trend": [8.6, 8.9, 9.0, 9.1]},
     {"id": str(uuid.uuid4()), "memberId": "u_arjun", "period": "monthly", "periodLabel": "Jan 2026", "jobsDone": 11, "onTime": 85, "quality": 8.7, "csat": 8.6, "deadline": 8.4, "comm": 8.5, "initiative": 8.6, "collab": 8.9, "good": "Voice matching is spot-on. Intercont+ posts sound genuinely like Gaurav.", "improve": "Reduce revision rounds by validating angle with Meera before drafting.", "actions": ["Pre-draft angle checks with Meera", "Track revision count per client"], "trend": [8.2, 8.4, 8.5, 8.6]},
@@ -129,8 +127,6 @@ async def seed_if_empty(db):
             d["updatedAt"] = _now_iso()
             docs.append(d)
         await db.jobs.insert_many(docs)
-    if await db.invoices.count_documents({}) == 0:
-        pass  # invoices section removed
     if await db.kpi.count_documents({}) == 0:
         await db.kpi.insert_many([{**k} for k in KPI])
     if await db.sops.count_documents({}) == 0:
