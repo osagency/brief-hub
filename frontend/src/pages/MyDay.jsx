@@ -68,7 +68,7 @@ export default function MyDay({ user }) {
               {myOverdue.length + dueToday.length === 0 && <span>Nothing on fire. Focus mode. 🎯</span>}
             </div>
           </div>
-          <button onClick={gitStandup} disabled={standup.loading} data-testid="ai-standup-btn" className="px-3 h-9 rounded-md bg-white/20 backdrop-blur hover:bg-white/30 text-sm font-semibold flex items-center gap-1 disabled:opacity-60">
+          <button onClick={generateStandup} disabled={standup.loading} data-testid="ai-standup-btn" className="px-3 h-9 rounded-md bg-white/20 backdrop-blur hover:bg-white/30 text-sm font-semibold flex items-center gap-1 disabled:opacity-60">
             {standup.loading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} AI standup
           </button>
         </div>
