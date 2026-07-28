@@ -20,9 +20,14 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **Multi-brand health** on Dashboard + Brief modal.
 
 ## What's Been Implemented (Feb 2026)
-- Full backend: auth, users, clients, jobs (CRUD + comments + team filter), invoices, content posts, timelogs, approvals with decisions, KPI list/create/coaching/team-review, SOPs list/create/generate, inbox list/parse-brief/draft-reply/create-job, notifications, reports, AI assistant, job help.
-- Full frontend: all 15 pages + Login + Job Detail modal + Brief modal with full gap-detection UI (missing info, draft email, workload warning, red flags, delegation table). Sidebar with badges, topbar with search, dark side-panel login split.
-- Passing tests: **30/30 backend + 100% frontend** (see `/app/test_reports/iteration_1.json`).
+- Full backend: auth, users, clients, jobs (CRUD + comments + team filter + **file attachments via Emergent object storage**), content posts, timelogs, approvals with decisions, KPI list/create/coaching/team-review, SOPs list/create/generate, inbox list/parse-brief/draft-reply/create-job, notifications, reports, AI assistant, job help.
+- Full frontend: all 14 pages + Login + Job Detail modal (with **attachments panel: upload/drop-zone/delete, ?auth token download**) + Brief modal with full gap-detection UI. Sidebar with badges, topbar with search, dark side-panel login split.
+- Passing tests: **32/32 backend + 100% frontend** across two iterations (see `/app/test_reports/iteration_1.json` and `iteration_2.json`).
+
+## Removed / Deferred
+- **Invoice section removed entirely** (Feb 2026) at user request. Route `/invoices` now redirects to `/dashboard`.
+- Real Gmail OAuth — pending user credentials
+- Real outbound email (Resend) — pending user credentials
 
 ## Prioritized Backlog
 ### P1
