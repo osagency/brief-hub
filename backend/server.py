@@ -1,5 +1,6 @@
 """Openspace Agency OS — FastAPI backend."""
 import os
+import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
@@ -628,14 +629,7 @@ async def create_timelog(data: TimeLogIn, user: dict = Depends(current_user)):
 
 @api.get("/approvals")
 async def list_approvals(_: dict = Depends(current_user)):
-    docs = await db.approvals.find({}).sort("sent", -1).to_list(200)
-    # Backfill public_token for legacy docs
-    for d in docs:
-        if not d.get("public_token"):
-            token = uuid.uuid4().hex[:20]
-            await db.approvals.update_one({"id": d["id"]}, {"$set": {"public_token": token}})
-            d["public_token"] = token
-    return _clean_list(docs)
+    return _clean_list(await db.approvals.find({}).sort("sent", -1).to_list(200))
 
 
 @api.post("/approvals/{approval_id}/decide")
@@ -660,7 +654,11 @@ async def _load_public_approval(token: str) -> dict:
     doc = await db.approvals.find_one({"public_token": token}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Approval link is invalid or expired")
-    job = await db.jobs.find_one({"id": doc.get("jobId")}, {"_id": 0, "comments": 0, "assignees": 0, "aiWorkflow": 0}) or {}
+    # Enrich with client + a SAFE PROJECTION of the job (never leak internal comments / hours / assignees / desc)
+    job = await db.jobs.find_one(
+        {"id": doc.get("jobId")},
+        {"_id": 0, "id": 1, "title": 1, "attachments": 1, "due": 1, "priority": 1},
+    ) or {}
     client = await db.clients.find_one({"id": doc.get("client")}, {"_id": 0}) or {}
     return {**doc, "job": job, "clientData": {"name": client.get("name"), "color": client.get("color"), "short": client.get("short")}}
 
@@ -677,18 +675,22 @@ async def public_decide_approval(token: str, body: PublicApprovalDecision):
         raise HTTPException(status_code=404, detail="Approval link is invalid")
     if body.action not in ("approve", "revise"):
         raise HTTPException(status_code=400, detail="Invalid action")
+    # Block stale flips: if already decided, tell the caller instead of silently overwriting
+    if doc.get("status") in ("approved", "rejected"):
+        raise HTTPException(status_code=409, detail=f"This item was already {doc['status']}. Ask Openspace to reopen it if you need to change the decision.")
     new_status = "approved" if body.action == "approve" else "rejected"
-    author = (body.author or "Client").strip() or "Client"
+    author = (body.author or "Client").strip()[:80] or "Client"
+    feedback_clean = (body.feedback or "").strip()[:4000]
     await db.approvals.update_one(
         {"public_token": token},
-        {"$set": {"status": new_status, "feedback": body.feedback or "", "decided_by_client": author, "decided_at": _now_iso()}},
+        {"$set": {"status": new_status, "feedback": feedback_clean, "decided_by_client": author, "decided_at": _now_iso()}},
     )
-    note = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": f"{author} (client)", "authorId": "public", "text": f"Client {'approved' if new_status=='approved' else 'requested revision'} via portal." + (f" Feedback: {body.feedback}" if body.feedback else ""), "at": _now_iso()}
+    note = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": f"{author} (client)", "authorId": "public", "text": f"Client {'approved' if new_status=='approved' else 'requested revision'} via portal." + (f" Feedback: {feedback_clean}" if feedback_clean else ""), "at": _now_iso()}
     await db.approvals.update_one({"public_token": token}, {"$push": {"comments": note}})
     await db.notifications.insert_one({
         "id": f"n-{uuid.uuid4().hex[:8]}",
         "title": f"Client {new_status}: {doc.get('title','')}",
-        "subtitle": f"{author} via client portal" + (f" · {body.feedback[:80]}" if body.feedback else ""),
+        "subtitle": f"{author} via client portal" + (f" · {feedback_clean[:80]}" if feedback_clean else ""),
         "time": _now_iso(),
         "type": "approval" if new_status == "approved" else "revision",
         "read": False,
@@ -701,8 +703,11 @@ async def public_add_comment(token: str, body: PublicApprovalComment):
     doc = await db.approvals.find_one({"public_token": token}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Approval link is invalid")
-    author = (body.author or "Client").strip() or "Client"
-    comment = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": f"{author} (client)", "authorId": "public", "text": body.text, "at": _now_iso()}
+    author = (body.author or "Client").strip()[:80] or "Client"
+    text = (body.text or "").strip()[:4000]
+    if not text:
+        raise HTTPException(status_code=400, detail="Comment cannot be empty")
+    comment = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": f"{author} (client)", "authorId": "public", "text": text, "at": _now_iso()}
     await db.approvals.update_one({"public_token": token}, {"$push": {"comments": comment}})
     return comment
 
@@ -734,14 +739,20 @@ async def global_search(q: str, user: dict = Depends(current_user)):
     q = (q or "").strip()
     if len(q) < 2:
         return {"jobs": [], "clients": [], "approvals": []}
-    regex = {"$regex": q, "$options": "i"}
+    safe = re.escape(q)
+    regex = {"$regex": safe, "$options": "i"}
     job_q = {"$or": [{"title": regex}, {"id": regex}, {"desc": regex}]}
     if not user.get("is_admin"):
         job_q = {"$and": [job_q, {"assignees": user["id"]}]}
     jobs = await db.jobs.find(job_q, {"_id": 0, "id": 1, "title": 1, "client": 1, "status": 1}).limit(6).to_list(6)
     clients = await db.clients.find({"$or": [{"name": regex}, {"short": regex}]}, {"_id": 0, "id": 1, "name": 1, "color": 1}).limit(4).to_list(4)
+    # Also join approvals by matching client name (denormalised via post-filter for now)
     appr_q = {"$or": [{"title": regex}, {"preview": regex}]}
     approvals = await db.approvals.find(appr_q, {"_id": 0, "id": 1, "jobId": 1, "title": 1, "status": 1, "client": 1}).limit(4).to_list(4)
+    if clients:
+        client_ids = [c["id"] for c in clients]
+        extras = await db.approvals.find({"client": {"$in": client_ids}, "id": {"$nin": [a["id"] for a in approvals]}}, {"_id": 0, "id": 1, "jobId": 1, "title": 1, "status": 1, "client": 1}).limit(4 - len(approvals)).to_list(4)
+        approvals.extend(extras)
     return {"jobs": jobs, "clients": clients, "approvals": approvals}
 
 
@@ -1166,6 +1177,9 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await seed_data.seed_if_empty(db)
+    # One-time migration: ensure every approval has a public_token
+    async for doc in db.approvals.find({"public_token": {"$exists": False}}, {"id": 1}):
+        await db.approvals.update_one({"id": doc["id"]}, {"$set": {"public_token": uuid.uuid4().hex[:20]}})
     try:
         storage_service.init_storage()
     except Exception as e:
