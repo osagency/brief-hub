@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import api, { API } from "../lib/api";
 import { toast } from "sonner";
 import { ROLE_EMOJI, ROLE_COLOR, fmtDate, STATUS_LABEL } from "../lib/constants";
-import { X, Send, Mail, ListChecks, MessageSquare, Bell, Paperclip, Upload, Trash2, FileText, ImageIcon, File as FileIcon, Loader2 } from "lucide-react";
+import { X, Send, Mail, ListChecks, MessageSquare, Bell, Paperclip, Upload, Trash2, FileText, ImageIcon, File as FileIcon, Loader2, AtSign } from "lucide-react";
+import { AttachmentPreview } from "../pages/PublicApproval";
 
 const STAGES = ["Brief", "Create", "Review", "Approve", "Deliver"];
 const STATUS_TO_STAGE = { todo: 0, active: 1, review: 2, done: 4, overdue: 1 };
@@ -14,6 +15,9 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
   const [aiReply, setAiReply] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [previewAtt, setPreviewAtt] = useState(null);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
   const fileInputRef = useRef(null);
 
   const reload = async () => {
@@ -44,9 +48,41 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
 
   const postComment = async () => {
     if (!comment.trim()) return;
-    await api.post(`/jobs/${job.id}/comments`, { text: comment });
+    // extract @mentions from text
+    const mentioned = [];
+    const mentionRe = /@(\w+)/g;
+    let m;
+    while ((m = mentionRe.exec(comment)) !== null) {
+      const nameFrag = m[1].toLowerCase();
+      const u = users.find(u => u.name.toLowerCase().startsWith(nameFrag));
+      if (u && !mentioned.includes(u.id)) mentioned.push(u.id);
+    }
+    await api.post(`/jobs/${job.id}/comments`, { text: comment, mentions: mentioned });
     setComment("");
+    setMentionOpen(false);
     await reload();
+  };
+
+  const onCommentChange = (val) => {
+    setComment(val);
+    const lastAt = val.lastIndexOf("@");
+    if (lastAt >= 0 && lastAt === val.length - 1) {
+      setMentionQuery("");
+      setMentionOpen(true);
+    } else if (lastAt >= 0 && !/\s/.test(val.slice(lastAt))) {
+      setMentionQuery(val.slice(lastAt + 1));
+      setMentionOpen(true);
+    } else {
+      setMentionOpen(false);
+    }
+  };
+
+  const pickMention = (u) => {
+    const idx = comment.lastIndexOf("@");
+    if (idx >= 0) {
+      setComment(comment.slice(0, idx) + `@${u.name.split(" ")[0]} `);
+    }
+    setMentionOpen(false);
   };
 
   const uploadFiles = async (files) => {
@@ -87,6 +123,8 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
     const token = localStorage.getItem("os_token");
     return `${API}/jobs/${job.id}/attachments/${att.id}?auth=${encodeURIComponent(token)}`;
   };
+
+  const mentionCandidates = users.filter(u => u.name.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 5);
 
   const runAI = async (kind) => {
     setAiKind(kind); setAiLoading(true); setAiReply("");
@@ -178,10 +216,10 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
                     return (
                       <div key={att.id} className="flex items-center gap-2 p-2 rounded-md border border-[#E5E8F0] bg-white" data-testid={`attachment-${att.id}`}>
                         <div className="w-8 h-8 rounded-md flex items-center justify-center bg-slate-100 text-slate-600"><Icon size={14} /></div>
-                        <div className="flex-1 min-w-0">
-                          <a href={downloadUrl(att)} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-slate-900 hover:text-[#4361EE] truncate block" data-testid={`attachment-link-${att.id}`}>{att.filename}</a>
+                        <button onClick={() => setPreviewAtt(att)} className="flex-1 min-w-0 text-left" data-testid={`attachment-preview-${att.id}`}>
+                          <div className="text-[13px] font-medium text-slate-900 hover:text-[#4361EE] truncate block">{att.filename}</div>
                           <div className="text-[10px] mono text-slate-500">{(att.size/1024).toFixed(1)} KB · {att.uploaded_by_name} · {fmtDate(att.uploaded_at)}</div>
-                        </div>
+                        </button>
                         <button onClick={() => deleteAttachment(att.id)} data-testid={`delete-attachment-${att.id}`} className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50" title="Delete"><Trash2 size={13} /></button>
                       </div>
                     );
@@ -206,9 +244,23 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
                 </div>
               ))}
             </div>
-            <div className="mt-3 flex gap-2">
-              <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a comment…" data-testid="comment-input" className="flex-1 h-9 px-3 rounded-md border border-[#E5E8F0] text-sm focus:border-[#4361EE]" />
+            <div className="mt-3 flex gap-2 relative">
+              <input value={comment} onChange={(e) => onCommentChange(e.target.value)} placeholder="Add a comment… type @ to mention" data-testid="comment-input" className="flex-1 h-9 px-3 rounded-md border border-[#E5E8F0] text-sm focus:border-[#4361EE]" />
               <button onClick={postComment} data-testid="post-comment-btn" className="px-3 h-9 rounded-md bg-slate-900 text-white text-[12px] font-medium hover:bg-slate-700 transition flex items-center gap-1"><Send size={12} />Post</button>
+              {mentionOpen && mentionCandidates.length > 0 && (
+                <div className="absolute bottom-11 left-0 bg-white border border-[#E5E8F0] rounded-lg shadow-lg overflow-hidden z-30 w-64" data-testid="mention-dropdown">
+                  <div className="px-2 py-1 text-[10px] uppercase mono tracking-widest text-slate-500 bg-slate-50 flex items-center gap-1"><AtSign size={10} /> mention</div>
+                  {mentionCandidates.map(u => (
+                    <button key={u.id} onMouseDown={() => pickMention(u)} data-testid={`mention-${u.id}`} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50">
+                      <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=4361EE&color=fff`} className="w-6 h-6 rounded-full" alt={u.name} />
+                      <div>
+                        <div className="text-[13px] text-slate-900">{u.name}</div>
+                        <div className="text-[10px] mono text-slate-500">{u.role_label}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -269,6 +321,9 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
           </div>
         </aside>
       </div>
+      {previewAtt && (
+        <AttachmentPreview att={previewAtt} url={downloadUrl(previewAtt)} onClose={() => setPreviewAtt(null)} />
+      )}
     </div>
   );
 }

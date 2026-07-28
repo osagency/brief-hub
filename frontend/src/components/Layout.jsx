@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Inbox, Bell, Briefcase, KanbanSquare,
   Calendar, CheckCircle2, Timer, Users, LineChart, BookOpen,
@@ -51,6 +51,77 @@ const SECTIONS = [
     ],
   },
 ];
+
+function GlobalSearch() {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [results, setResults] = useState({ jobs: [], clients: [], approvals: [] });
+  const nav = useNavigate();
+
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults({ jobs: [], clients: [], approvals: [] }); return; }
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/search", { params: { q } });
+        setResults(data);
+        setOpen(true);
+      } catch {}
+    }, 200);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const total = results.jobs.length + results.clients.length + results.approvals.length;
+
+  return (
+    <div className="relative flex-1 max-w-xl">
+      <div className="flex items-center gap-3 text-slate-600 h-9">
+        <Search size={14} className="text-slate-400" />
+        <input
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          onFocus={() => q.length >= 2 && setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 200)}
+          data-testid="global-search"
+          placeholder="Search jobs, clients, approvals…"
+          className="bg-transparent outline-none text-[13px] placeholder:text-slate-400 flex-1"
+        />
+      </div>
+      {open && total > 0 && (
+        <div className="absolute top-11 left-0 right-0 bg-white border border-[#E5E8F0] rounded-[12px] shadow-lg overflow-hidden z-40" data-testid="search-results">
+          {results.jobs.length > 0 && <SearchSection label="Jobs" items={results.jobs} render={(j) => (
+            <button key={j.id} onMouseDown={() => nav("/jobs")} data-testid={`search-job-${j.id}`} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50">
+              <span className="mono text-[10px] text-slate-400 w-14">{j.id}</span>
+              <span className="text-[13px] text-slate-900 flex-1 truncate">{j.title}</span>
+              <span className={`chip status-${j.status}`}>{j.status}</span>
+            </button>
+          )} />}
+          {results.clients.length > 0 && <SearchSection label="Clients" items={results.clients} render={(c) => (
+            <button key={c.id} onMouseDown={() => nav("/clients")} data-testid={`search-client-${c.id}`} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50">
+              <span className="w-2 h-2 rounded-full" style={{ background: c.color }} />
+              <span className="text-[13px] text-slate-900 flex-1">{c.name}</span>
+            </button>
+          )} />}
+          {results.approvals.length > 0 && <SearchSection label="Approvals" items={results.approvals} render={(a) => (
+            <button key={a.id} onMouseDown={() => nav("/approvals")} data-testid={`search-approval-${a.id}`} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50">
+              <span className="mono text-[10px] text-slate-400 w-14">{a.jobId}</span>
+              <span className="text-[13px] text-slate-900 flex-1 truncate">{a.title}</span>
+            </button>
+          )} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SearchSection({ label, items, render }) {
+  return (
+    <div className="border-b border-[#E5E8F0] last:border-b-0">
+      <div className="px-3 py-1.5 text-[10px] uppercase mono tracking-widest text-slate-500 bg-slate-50">{label}</div>
+      {items.map(render)}
+    </div>
+  );
+}
+
 
 function Badge({ kind, counts }) {
   const map = {
@@ -143,14 +214,7 @@ export default function Layout({ children }) {
 
       {/* Topbar */}
       <header className="fixed top-0 left-[220px] right-0 h-[54px] bg-white/85 backdrop-blur-md border-b border-[#E5E8F0] z-20 flex items-center justify-between px-6" data-testid="topbar">
-        <div className="flex items-center gap-3 text-slate-600 flex-1 max-w-xl">
-          <Search size={14} className="text-slate-400" />
-          <input
-            data-testid="global-search"
-            placeholder="Search jobs, clients…"
-            className="bg-transparent outline-none text-[13px] placeholder:text-slate-400 flex-1"
-          />
-        </div>
+        <GlobalSearch />
         <div className="flex items-center gap-3 text-[12px] text-slate-600 mono">
           <span>Mumbai · {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
         </div>

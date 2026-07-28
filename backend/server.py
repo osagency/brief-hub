@@ -269,6 +269,22 @@ class ApprovalCommentIn(BaseModel):
     text: str
 
 
+class MentionCommentIn(BaseModel):
+    text: str
+    mentions: list[str] = []  # list of user ids
+
+
+class PublicApprovalDecision(BaseModel):
+    action: str  # approve | revise
+    feedback: Optional[str] = ""
+    author: Optional[str] = None  # client-provided name
+
+
+class PublicApprovalComment(BaseModel):
+    text: str
+    author: Optional[str] = None
+
+
 # ---------- auth ----------
 
 @api.post("/auth/login")
@@ -480,12 +496,37 @@ async def create_job(data: JobCreate, _: dict = Depends(manager_only)):
 
 
 @api.post("/jobs/{job_id}/comments")
-async def add_comment(job_id: str, body: CommentIn, user: dict = Depends(current_user)):
+async def add_comment(job_id: str, body: MentionCommentIn, user: dict = Depends(current_user)):
     q = _apply_role_filter({"id": job_id}, user)
-    comment = {"id": f"c-{int(datetime.now().timestamp()*1000)}", "author": user["name"], "authorId": user["id"], "text": body.text, "at": _now_iso()}
-    result = await db.jobs.update_one(q, {"$push": {"comments": comment}, "$set": {"updatedAt": _now_iso()}})
-    if result.matched_count == 0:
+    job = await db.jobs.find_one(q, {"_id": 0})
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    comment = {
+        "id": f"c-{int(datetime.now().timestamp()*1000)}",
+        "author": user["name"],
+        "authorId": user["id"],
+        "text": body.text,
+        "mentions": body.mentions or [],
+        "at": _now_iso(),
+    }
+    await db.jobs.update_one({"id": job_id}, {"$push": {"comments": comment}, "$set": {"updatedAt": _now_iso()}})
+    # Fan-out notifications for mentioned users
+    for uid in (body.mentions or []):
+        if uid == user["id"]:
+            continue
+        target = await db.users.find_one({"id": uid}, {"_id": 0})
+        if not target:
+            continue
+        await db.notifications.insert_one({
+            "id": f"n-{uuid.uuid4().hex[:8]}",
+            "title": f"{user['name']} mentioned you in {job['id']}",
+            "subtitle": (body.text[:100] + "…") if len(body.text) > 100 else body.text,
+            "time": _now_iso(),
+            "type": "mention",
+            "read": False,
+            "user_id": uid,
+            "job_id": job_id,
+        })
     return comment
 
 
@@ -587,7 +628,14 @@ async def create_timelog(data: TimeLogIn, user: dict = Depends(current_user)):
 
 @api.get("/approvals")
 async def list_approvals(_: dict = Depends(current_user)):
-    return _clean_list(await db.approvals.find({}).sort("sent", -1).to_list(200))
+    docs = await db.approvals.find({}).sort("sent", -1).to_list(200)
+    # Backfill public_token for legacy docs
+    for d in docs:
+        if not d.get("public_token"):
+            token = uuid.uuid4().hex[:20]
+            await db.approvals.update_one({"id": d["id"]}, {"$set": {"public_token": token}})
+            d["public_token"] = token
+    return _clean_list(docs)
 
 
 @api.post("/approvals/{approval_id}/decide")
@@ -601,6 +649,100 @@ async def decide_approval(approval_id: str, body: ApprovalDecision, _: dict = De
     await db.approvals.update_one({"id": approval_id}, {"$set": {"status": new_status, "feedback": body.feedback or ""}})
     doc = await db.approvals.find_one({"id": approval_id})
     return _clean(doc)
+
+
+# ---------- public client portal (no auth) ----------
+
+public_api = APIRouter(prefix="/api/public")
+
+
+async def _load_public_approval(token: str) -> dict:
+    doc = await db.approvals.find_one({"public_token": token}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Approval link is invalid or expired")
+    job = await db.jobs.find_one({"id": doc.get("jobId")}, {"_id": 0, "comments": 0, "assignees": 0, "aiWorkflow": 0}) or {}
+    client = await db.clients.find_one({"id": doc.get("client")}, {"_id": 0}) or {}
+    return {**doc, "job": job, "clientData": {"name": client.get("name"), "color": client.get("color"), "short": client.get("short")}}
+
+
+@public_api.get("/approvals/{token}")
+async def public_get_approval(token: str):
+    return await _load_public_approval(token)
+
+
+@public_api.post("/approvals/{token}/decide")
+async def public_decide_approval(token: str, body: PublicApprovalDecision):
+    doc = await db.approvals.find_one({"public_token": token}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Approval link is invalid")
+    if body.action not in ("approve", "revise"):
+        raise HTTPException(status_code=400, detail="Invalid action")
+    new_status = "approved" if body.action == "approve" else "rejected"
+    author = (body.author or "Client").strip() or "Client"
+    await db.approvals.update_one(
+        {"public_token": token},
+        {"$set": {"status": new_status, "feedback": body.feedback or "", "decided_by_client": author, "decided_at": _now_iso()}},
+    )
+    note = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": f"{author} (client)", "authorId": "public", "text": f"Client {'approved' if new_status=='approved' else 'requested revision'} via portal." + (f" Feedback: {body.feedback}" if body.feedback else ""), "at": _now_iso()}
+    await db.approvals.update_one({"public_token": token}, {"$push": {"comments": note}})
+    await db.notifications.insert_one({
+        "id": f"n-{uuid.uuid4().hex[:8]}",
+        "title": f"Client {new_status}: {doc.get('title','')}",
+        "subtitle": f"{author} via client portal" + (f" · {body.feedback[:80]}" if body.feedback else ""),
+        "time": _now_iso(),
+        "type": "approval" if new_status == "approved" else "revision",
+        "read": False,
+    })
+    return await _load_public_approval(token)
+
+
+@public_api.post("/approvals/{token}/comments")
+async def public_add_comment(token: str, body: PublicApprovalComment):
+    doc = await db.approvals.find_one({"public_token": token}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Approval link is invalid")
+    author = (body.author or "Client").strip() or "Client"
+    comment = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": f"{author} (client)", "authorId": "public", "text": body.text, "at": _now_iso()}
+    await db.approvals.update_one({"public_token": token}, {"$push": {"comments": comment}})
+    return comment
+
+
+@public_api.get("/approvals/{token}/attachments/{attachment_id}")
+async def public_download_attachment(token: str, attachment_id: str):
+    doc = await db.approvals.find_one({"public_token": token}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Approval link is invalid")
+    job = await db.jobs.find_one({"id": doc.get("jobId")}, {"_id": 0}) or {}
+    att = next((a for a in job.get("attachments", []) if a.get("id") == attachment_id and not a.get("is_deleted")), None)
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    try:
+        content, _ = storage_service.get_object(att["storage_path"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download failed: {e}")
+    return Response(
+        content=content,
+        media_type=att.get("content_type", "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{att["filename"]}"'},
+    )
+
+
+# ---------- global search ----------
+
+@api.get("/search")
+async def global_search(q: str, user: dict = Depends(current_user)):
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"jobs": [], "clients": [], "approvals": []}
+    regex = {"$regex": q, "$options": "i"}
+    job_q = {"$or": [{"title": regex}, {"id": regex}, {"desc": regex}]}
+    if not user.get("is_admin"):
+        job_q = {"$and": [job_q, {"assignees": user["id"]}]}
+    jobs = await db.jobs.find(job_q, {"_id": 0, "id": 1, "title": 1, "client": 1, "status": 1}).limit(6).to_list(6)
+    clients = await db.clients.find({"$or": [{"name": regex}, {"short": regex}]}, {"_id": 0, "id": 1, "name": 1, "color": 1}).limit(4).to_list(4)
+    appr_q = {"$or": [{"title": regex}, {"preview": regex}]}
+    approvals = await db.approvals.find(appr_q, {"_id": 0, "id": 1, "jobId": 1, "title": 1, "status": 1, "client": 1}).limit(4).to_list(4)
+    return {"jobs": jobs, "clients": clients, "approvals": approvals}
 
 
 # ---------- inbox ----------
@@ -1010,6 +1152,7 @@ async def root():
 
 
 app.include_router(api)
+app.include_router(public_api)
 
 app.add_middleware(
     CORSMiddleware,

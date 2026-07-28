@@ -21,6 +21,7 @@ import Vibes from "./pages/Vibes";
 import Notifications from "./pages/Notifications";
 import PromptStudio from "./pages/PromptStudio";
 import MyDay from "./pages/MyDay";
+import PublicApproval from "./pages/PublicApproval";
 import "./App.css";
 
 function Protected({ children, managerOnly }) {
@@ -40,6 +41,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/client/approval/:token" element={<PublicApproval />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Protected><DashboardOrMyDay /></Protected>} />
       <Route path="/inbox" element={<Protected managerOnly><Inbox /></Protected>} />

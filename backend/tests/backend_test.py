@@ -644,12 +644,24 @@ class TestApprovalsSharp:
         assert c["text"] == "TEST_mgr_comment_iter4"
         assert "authorId" in c and "author" in c and "at" in c
 
-    def test_add_comment_as_team(self, team_token):
-        # team can post comments
-        r = requests.post(f"{API}/approvals/ap-2/comments", headers=hdr(team_token),
-                          json={"text": "TEST_team_comment_iter4"}, timeout=20)
-        assert r.status_code == 200
-        assert r.json()["text"] == "TEST_team_comment_iter4"
+    def test_add_comment_as_team(self, team_token, mgr_token):
+        # team can comment on approvals for jobs they are ASSIGNED to.
+        # Find an approval whose job includes u_arjun in assignees.
+        jobs = requests.get(f"{API}/jobs", headers=hdr(mgr_token), timeout=20).json()
+        arjun_jobs = {j["id"] for j in jobs if "u_arjun" in j.get("assignees", [])}
+        appr = requests.get(f"{API}/approvals", headers=hdr(mgr_token), timeout=20).json()
+        target = next((a for a in appr if a.get("jobId") in arjun_jobs), None)
+        if target is None:
+            pytest.skip("no approval linked to a job assigned to arjun in seed data")
+        r = requests.post(f"{API}/approvals/{target['id']}/comments", headers=hdr(team_token),
+                          json={"text": "TEST_team_comment_iter5"}, timeout=20)
+        assert r.status_code == 200, r.text
+        assert r.json()["text"] == "TEST_team_comment_iter5"
+
+        # And team is FORBIDDEN from commenting on approvals for jobs they aren't on (ap-2 → OS-008 → u_rohan)
+        r2 = requests.post(f"{API}/approvals/ap-2/comments", headers=hdr(team_token),
+                           json={"text": "TEST_should_403"}, timeout=20)
+        assert r2.status_code == 403
 
     def test_reminder_manager_only(self, mgr_token, team_token):
         # team forbidden
@@ -725,3 +737,191 @@ class TestBoardDragPatch:
         assert g["status"] == target
         # revert
         requests.patch(f"{API}/jobs/{jid}", headers=hdr(mgr_token), json={"status": orig}, timeout=20)
+
+
+
+# ========== Iteration 5: Public Client Portal, Global Search, @Mentions ==========
+
+@pytest.fixture
+def pending_approval(mgr_token):
+    """Ensure ap-5 (OS-009) is in pending state and return its record."""
+    requests.post(f"{API}/approvals/ap-5/decide",
+                  headers=hdr(mgr_token), json={"action": "reopen"}, timeout=20)
+    appr = requests.get(f"{API}/approvals", headers=hdr(mgr_token), timeout=20).json()
+    target = next(a for a in appr if a["id"] == "ap-5")
+    return target
+
+
+class TestPublicPortal:
+    """Public (no-auth) client approval portal endpoints."""
+
+    def test_backfill_token_stable(self, mgr_token):
+        # first list backfills tokens
+        r1 = requests.get(f"{API}/approvals", headers=hdr(mgr_token), timeout=20)
+        assert r1.status_code == 200
+        first = {a["id"]: a["public_token"] for a in r1.json()}
+        assert all(t and len(t) >= 16 for t in first.values()), "some approvals missing public_token"
+        # second call: tokens must be stable
+        r2 = requests.get(f"{API}/approvals", headers=hdr(mgr_token), timeout=20)
+        second = {a["id"]: a["public_token"] for a in r2.json()}
+        assert first == second, "public_token changed between calls"
+
+    def test_public_get_ok(self, mgr_token, pending_approval):
+        target = pending_approval
+        token = target["public_token"]
+        # NO auth header
+        r = requests.get(f"{API}/public/approvals/{token}", timeout=20)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["id"] == target["id"]
+        assert "job" in d and "clientData" in d
+        assert d["clientData"].get("name")
+
+    def test_public_get_invalid_token_404(self):
+        r = requests.get(f"{API}/public/approvals/not_a_real_token_xxxx", timeout=20)
+        assert r.status_code == 404
+
+    def test_public_comment_flow(self, mgr_token, pending_approval):
+        target = pending_approval
+        token = target["public_token"]
+        r = requests.post(f"{API}/public/approvals/{token}/comments",
+                          json={"text": "TEST_iter5 client question", "author": "TEST Client"},
+                          timeout=20)
+        assert r.status_code == 200, r.text
+        c = r.json()
+        assert c["text"] == "TEST_iter5 client question"
+        assert "(client)" in c["author"]
+        # verify persisted
+        r2 = requests.get(f"{API}/public/approvals/{token}", timeout=20)
+        texts = [x["text"] for x in r2.json().get("comments", [])]
+        assert "TEST_iter5 client question" in texts
+
+    def test_public_decide_revise_creates_notification_and_comment(self, mgr_token, pending_approval):
+        target = pending_approval
+        token = target["public_token"]
+
+        notifs_before = requests.get(f"{API}/notifications", headers=hdr(mgr_token), timeout=20).json()
+        n_before = len(notifs_before)
+
+        r = requests.post(f"{API}/public/approvals/{token}/decide",
+                          json={"action": "revise", "feedback": "TEST_iter5 pls make logo bigger", "author": "TEST Client"},
+                          timeout=20)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["status"] == "rejected"
+        assert d["decided_by_client"] == "TEST Client"
+        assert any("client" in (c.get("author","").lower()) and "requested revision" in c.get("text","").lower()
+                   for c in d.get("comments", [])), "auto-comment missing"
+
+        notifs_after = requests.get(f"{API}/notifications", headers=hdr(mgr_token), timeout=20).json()
+        assert len(notifs_after) > n_before, "no notification inserted after client decision"
+        latest = notifs_after[0]
+        assert latest.get("type") in ("revision", "approval")
+
+        # revert to pending for other tests
+        requests.post(f"{API}/approvals/{target['id']}/decide",
+                      headers=hdr(mgr_token), json={"action": "reopen"}, timeout=20)
+
+    def test_public_decide_invalid_action_400(self, mgr_token):
+        appr = requests.get(f"{API}/approvals", headers=hdr(mgr_token), timeout=20).json()
+        token = appr[0]["public_token"]
+        r = requests.post(f"{API}/public/approvals/{token}/decide",
+                          json={"action": "delete"}, timeout=20)
+        assert r.status_code == 400
+
+    def test_public_attachment_download_no_auth(self, mgr_token, pending_approval):
+        target = pending_approval
+        job_id = target["jobId"]
+        token = target["public_token"]
+
+        png = tiny_png_bytes()
+        up = requests.post(f"{API}/jobs/{job_id}/attachments",
+                           headers=hdr(mgr_token),
+                           files={"file": ("TEST_iter5.png", png, "image/png")},
+                           timeout=30)
+        assert up.status_code == 200, up.text
+        att_id = up.json()["id"]
+
+        # NO auth header
+        dl = requests.get(f"{API}/public/approvals/{token}/attachments/{att_id}", timeout=20)
+        assert dl.status_code == 200, dl.text
+        assert dl.content == png
+        assert dl.headers.get("content-type", "").startswith("image/")
+
+        # cleanup
+        requests.delete(f"{API}/jobs/{job_id}/attachments/{att_id}", headers=hdr(mgr_token), timeout=20)
+
+
+class TestGlobalSearch:
+    def test_search_requires_auth(self):
+        r = requests.get(f"{API}/search", params={"q": "cinema"}, timeout=20)
+        assert r.status_code == 401
+
+    def test_search_manager_finds_cinema(self, mgr_token):
+        r = requests.get(f"{API}/search", params={"q": "cinema"}, headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert "jobs" in d and "clients" in d and "approvals" in d
+        job_titles = " ".join(j["title"].lower() for j in d["jobs"])
+        assert "cinema" in job_titles, f"expected cinema job in results: {d['jobs']}"
+
+    def test_search_short_query_returns_empty(self, mgr_token):
+        r = requests.get(f"{API}/search", params={"q": "a"}, headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 200
+        assert r.json() == {"jobs": [], "clients": [], "approvals": []}
+
+    def test_search_role_scoped_for_team(self, team_token, mgr_token):
+        # Manager sees at least as many jobs as team for a generic term
+        term = "report"
+        mgr = requests.get(f"{API}/search", params={"q": term}, headers=hdr(mgr_token), timeout=20).json()
+        team = requests.get(f"{API}/search", params={"q": term}, headers=hdr(team_token), timeout=20).json()
+        assert len(team["jobs"]) <= len(mgr["jobs"])
+        # every team job must belong to arjun
+        me = requests.get(f"{API}/auth/me", headers=hdr(team_token), timeout=20).json()
+        for j in team["jobs"]:
+            full = requests.get(f"{API}/jobs/{j['id']}", headers=hdr(team_token), timeout=20)
+            # if arjun can GET it, he's assigned; if 404, then it's leaking
+            assert full.status_code == 200, f"team saw job {j['id']} in search but can't fetch it"
+
+
+class TestMentions:
+    def test_mention_creates_notification(self, mgr_token):
+        # Pick a job assigned to Arjun so both users can view
+        jobs = requests.get(f"{API}/jobs", headers=hdr(mgr_token), timeout=20).json()
+        j = next(x for x in jobs if "u_arjun" in x.get("assignees", []))
+        # baseline arjun's notifications
+        # need arjun token
+        arjun_t = requests.post(f"{API}/auth/login",
+                                 json={"email": "arjun@osagency.in", "password": "team123"}, timeout=20).json()["token"]
+        before = requests.get(f"{API}/notifications", headers=hdr(arjun_t), timeout=20).json()
+        n_before = len([n for n in before if n.get("user_id") == "u_arjun" and n.get("type") == "mention"])
+
+        r = requests.post(f"{API}/jobs/{j['id']}/comments",
+                          headers=hdr(mgr_token),
+                          json={"text": "TEST_iter5 @Arjun please review", "mentions": ["u_arjun"]},
+                          timeout=20)
+        assert r.status_code == 200, r.text
+        c = r.json()
+        assert c["mentions"] == ["u_arjun"]
+
+        after = requests.get(f"{API}/notifications", headers=hdr(arjun_t), timeout=20).json()
+        mine = [n for n in after if n.get("user_id") == "u_arjun" and n.get("type") == "mention"]
+        assert len(mine) == n_before + 1, f"expected +1 mention notif for arjun (before={n_before}, after={len(mine)})"
+        latest = mine[0]
+        assert "mentioned you" in latest["title"].lower()
+        assert j["id"] in latest["title"]
+
+    def test_self_mention_no_notification(self, mgr_token):
+        # Yusuf mentions himself; no self-notification should be created
+        jobs = requests.get(f"{API}/jobs", headers=hdr(mgr_token), timeout=20).json()
+        j = jobs[0]
+        before = requests.get(f"{API}/notifications", headers=hdr(mgr_token), timeout=20).json()
+        n_before_selfmention = len([n for n in before if n.get("user_id") == "u_yusuf" and n.get("type") == "mention"])
+        r = requests.post(f"{API}/jobs/{j['id']}/comments",
+                          headers=hdr(mgr_token),
+                          json={"text": "TEST_iter5 note to self @Yusuf", "mentions": ["u_yusuf"]},
+                          timeout=20)
+        assert r.status_code == 200
+        after = requests.get(f"{API}/notifications", headers=hdr(mgr_token), timeout=20).json()
+        n_after_selfmention = len([n for n in after if n.get("user_id") == "u_yusuf" and n.get("type") == "mention"])
+        assert n_after_selfmention == n_before_selfmention, "self-mention should not notify self"

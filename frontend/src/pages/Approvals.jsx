@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
 import { fmtDate } from "../lib/constants";
-import { CheckCircle2, RotateCcw, Undo2, MessageSquare, Send, Bell, Clock, RefreshCw } from "lucide-react";
+import { CheckCircle2, RotateCcw, Undo2, MessageSquare, Send, Bell, Clock, RefreshCw, Link2 } from "lucide-react";
 
 const daysAgo = (iso) => {
   if (!iso) return "—";
@@ -111,6 +111,20 @@ export default function Approvals() {
                 </div>
                 <span className={`chip ${tone}`}>{label}</span>
               </div>
+
+              {isManager && a.public_token && (
+                <button
+                  onClick={() => {
+                    const url = `${window.location.origin}/client/approval/${a.public_token}`;
+                    navigator.clipboard.writeText(url);
+                    toast.success("Client link copied — share via WhatsApp / email");
+                  }}
+                  data-testid={`copy-link-${a.id}`}
+                  className="mt-3 inline-flex items-center gap-1.5 text-[11px] mono text-[#4361EE] hover:underline"
+                >
+                  <Link2 size={12} /> Copy client review link
+                </button>
+              )}
 
               <div className="text-sm text-slate-600 mt-3 leading-relaxed bg-slate-50 rounded-md p-3">{a.preview}</div>
 
