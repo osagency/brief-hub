@@ -1,0 +1,135 @@
+{
+  "project_name": "Openspace Agency OS",
+  "app_type": "internal_saas_dashboard",
+  "theme": "light",
+  "typography": {
+    "primary_font": "Inter",
+    "primary_font_url": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
+    "secondary_font": "DM Mono",
+    "secondary_font_url": "https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap",
+    "hierarchy": {
+      "h1": "text-2xl font-semibold tracking-tight text-slate-900",
+      "h2": "text-xl font-semibold tracking-tight text-slate-900",
+      "h3": "text-lg font-medium text-slate-900",
+      "body": "text-sm text-slate-600 leading-relaxed",
+      "data_labels": "font-mono text-xs uppercase tracking-[0.05em] text-slate-500",
+      "data_values": "font-mono text-sm font-medium text-slate-900"
+    },
+    "instructions": "Use Inter for all primary UI elements, headings, and body text. Strictly use DM Mono for all IDs, dates, numbers, invoice amounts, and time tracking logs."
+  },
+  "colors": {
+    "background": "#F4F6F9",
+    "surface": "#FFFFFF",
+    "border": "#E5E8F0",
+    "text_primary": "#0F172A",
+    "text_secondary": "#64748B",
+    "accent_blue": "#4361EE",
+    "status": {
+      "to_do": "#94A3B8",
+      "in_progress": "#4361EE",
+      "in_review": "#F59E0B",
+      "done": "#10B981",
+      "overdue": "#EF4444",
+      "recurring": "#8B5CF6"
+    },
+    "clients": {
+      "Galalite Screens": "#4361EE",
+      "Lumina Screens": "#10B981",
+      "TKPL": "#F59E0B",
+      "Intercont+": "#8B5CF6",
+      "Safewater Lines": "#06B6D4",
+      "SmartCo Shipping": "#EF4444"
+    }
+  },
+  "visual_enhancers": {
+    "border_radius": {
+      "card": "rounded-[12px]",
+      "button": "rounded-md",
+      "badge": "rounded-full"
+    },
+    "shadows": {
+      "card": "shadow-[0_1px_3px_0_rgba(0,0,0,0.05),0_1px_2px_0_rgba(0,0,0,0.03)]",
+      "dropdown": "shadow-lg shadow-slate-200/50"
+    },
+    "borders": {
+      "default": "border border-[#E5E8F0]"
+    }
+  },
+  "layouts": {
+    "sidebar": {
+      "width": "220px",
+      "behavior": "fixed left-0 top-0 h-screen",
+      "styling": "bg-white border-r border-[#E5E8F0]"
+    },
+    "topbar": {
+      "height": "54px",
+      "behavior": "fixed top-0 right-0 left-[220px] z-40",
+      "styling": "bg-white/80 backdrop-blur-md border-b border-[#E5E8F0]"
+    },
+    "main_content": {
+      "spacing": "ml-[220px] pt-[54px] min-h-screen bg-[#F4F6F9] p-6 md:p-8"
+    },
+    "grids": {
+      "dashboard": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6",
+      "kanban": "grid grid-cols-5 gap-4 overflow-x-auto",
+      "clients": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+    }
+  },
+  "components": {
+    "tags_badges": "Always pill-shaped (rounded-full). Match background color (10-15% opacity) and text color to the status or client brand.",
+    "tables": "Clean, flat tables with sticky headers. Use DM Mono for tabular numeric data.",
+    "modals": "Dialog backdrop should be bg-slate-900/40 backdrop-blur-sm. Modals have 12px radius. Job details must include a 5-stage workflow diagram horizontally at the top.",
+    "cards": "White surfaces, 12px border-radius, 1px solid #E5E8F0, very subtle shadow.",
+    "kanban_board": "Columns should have grey backgrounds (e.g., bg-slate-50) with white cards inside. Ensure cards are draggable or visually imply drag capability."
+  },
+  "motion": {
+    "hover": "transition-colors duration-200 ease-in-out",
+    "active": "active:scale-[0.98]",
+    "page_transition": "animate-in fade-in duration-300"
+  },
+  "accessibility": {
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute (kebab-case, role-based). Example: data-testid='sidebar-dashboard-link'.",
+    "contrast": "Ensure sufficient contrast for all text over pill backgrounds.",
+    "focus": "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE] focus-visible:ring-offset-2"
+  },
+  "media": {
+    "images_behavior": "Avatars should be perfectly circular with a subtle inner ring. Hero/banners must be contained properly with object-cover."
+  },
+  "image_urls": {
+    "team_avatars": {
+      "Yusuf": "https://ui-avatars.com/api/?name=Yusuf&background=4361EE&color=fff&size=150",
+      "Arjun": "https://ui-avatars.com/api/?name=Arjun&background=10B981&color=fff&size=150",
+      "Priya": "https://ui-avatars.com/api/?name=Priya&background=F59E0B&color=fff&size=150",
+      "Kavya": "https://ui-avatars.com/api/?name=Kavya&background=8B5CF6&color=fff&size=150",
+      "Rohan": "https://ui-avatars.com/api/?name=Rohan&background=06B6D4&color=fff&size=150",
+      "Meera": "https://ui-avatars.com/api/?name=Meera&background=EF4444&color=fff&size=150"
+    },
+    "vibes_banner": {
+      "url": "https://images.pexels.com/photos/7550530/pexels-photo-7550530.jpeg",
+      "description": "Diverse group of adults in a modern office. Used for the /vibes motivation banner."
+    }
+  },
+  "libraries": {
+    "charts": "recharts (for KPI rings, bar charts, line graphs)",
+    "icons": "lucide-react",
+    "toasts": "sonner",
+    "ui_components": "shadcn/ui (radix based)"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the user's explicit color codes for backgrounds, borders, and clients.",
+    "Use standard React (.jsx/.js) files. DO NOT use TypeScript (.tsx/.ts).",
+    "Ensure the sidebar navigation accurately maps all 15 routes.",
+    "The Smart Inbox page must feature an AI Brief Parser modal heavily highlighted in the UI.",
+    "Build the KPI page with SVG score rings using Recharts or custom SVGs.",
+    "Do NOT center align the main application wrapper. Keep text alignment natural (left).",
+    "Never use a completely transparent background for headers, dropdowns, or modals.",
+    "Apply `data-testid` to buttons, links, form inputs, and major containers."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Prioritize using pre-existing components from src/components/ui.",
+    "Create depth through layered design elements with z-index hierarchy and subtle shadows, but keep it professional and clean for an internal dashboard.",
+    "Avoid generic, 'on-distribution' AI slop. Make the internal tool feel premium and lightning-fast.",
+    "Include hover states and micro-interactions on all actionable elements without breaking layout.",
+    "Do not use emojis for icons. Use lucide-react."
+  ]
+}
