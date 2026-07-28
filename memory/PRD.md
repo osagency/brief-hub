@@ -20,12 +20,14 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **Multi-brand health** on Dashboard + Brief modal.
 
 ## What's Been Implemented (Feb 2026)
-- Full backend: auth, users, clients, jobs (CRUD + comments + team filter + **file attachments via Emergent object storage**), content posts, timelogs, approvals with decisions, KPI list/create/coaching/team-review, SOPs list/create/generate, inbox list/parse-brief/draft-reply/create-job, notifications, reports, AI assistant, job help.
-- Full frontend: all 14 pages + Login + Job Detail modal (with **attachments panel: upload/drop-zone/delete, ?auth token download**) + Brief modal with full gap-detection UI. Sidebar with badges, topbar with search, dark side-panel login split.
-- Passing tests: **32/32 backend + 100% frontend** across two iterations (see `/app/test_reports/iteration_1.json` and `iteration_2.json`).
+- Full backend: auth, users (**full CRUD + password reset**), clients (**full CRUD**), jobs (CRUD + comments + team filter + file attachments via Emergent object storage), content posts, timelogs, approvals with decisions, KPI list/create/coaching/team-review, SOPs list/create/generate, inbox list/parse-brief/draft-reply/create-job, notifications, reports, AI assistant, job help.
+- Full frontend: 15 pages (Dashboard, Inbox, Jobs, Board, Calendar, Approvals, Time, Clients, **Manage Team**, KPI, SOPs, Reports, AI, Vibes, Notifications) + Login + Job Detail modal + Brief modal + client/team edit-delete modals.
+- Passing tests: **iteration 1**: 30/30 backend + 100% frontend. **iteration 2**: 32/32 backend + 100% frontend. **iteration 3**: 44/44 backend + 100% frontend.
+- **SOP seed expanded to 20 entries** — covers all 5 roles + escalation + scope-creep.
 
 ## Removed / Deferred
-- **Invoice section removed entirely** (Feb 2026) at user request. Route `/invoices` now redirects to `/dashboard`.
+- **Invoice section removed entirely** (Feb 2026).
+- **Monthly revenue + client retainer amounts removed** (Feb 2026): Dashboard now shows Done-this-month + Jobs-per-client; Clients no longer show retainer; TimeTracker shows Hours-per-client instead of Profitability. AI system prompt no longer includes rupee amounts.
 - Real Gmail OAuth — pending user credentials
 - Real outbound email (Resend) — pending user credentials
 

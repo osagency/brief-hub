@@ -34,7 +34,15 @@ export default function Team() {
 
   const onRoleChange = (role_key) => {
     const r = ROLES.find(x => x.key === role_key);
-    setModal(m => ({ ...m, form: { ...m.form, role_key, role_label: r?.label || role_key, is_admin: role_key === "manager" || m.form.is_admin } }));
+    setModal(m => ({
+      ...m,
+      form: {
+        ...m.form,
+        role_key,
+        role_label: r?.label || role_key,
+        is_admin: role_key === "manager" ? true : m.form.is_admin,
+      },
+    }));
   };
 
   const submit = async (e) => {
@@ -135,8 +143,14 @@ export default function Team() {
               {ROLES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
             </select>
             <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={modal.form.is_admin} onChange={e => setModal({ ...modal, form: { ...modal.form, is_admin: e.target.checked } })} data-testid="member-admin" />
-              Make admin (full access to invoices-free ops, everything)
+              <input
+                type="checkbox"
+                checked={modal.form.is_admin}
+                disabled={modal.form.role_key === "manager"}
+                onChange={e => setModal({ ...modal, form: { ...modal.form, is_admin: e.target.checked } })}
+                data-testid="member-admin"
+              />
+              Make admin {modal.form.role_key === "manager" && <span className="text-xs text-slate-400 mono">(always for Manager)</span>}
             </label>
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" onClick={() => setModal({ ...modal, open: false })} className="px-3 h-9 rounded-md border border-[#E5E8F0] text-sm">Cancel</button>

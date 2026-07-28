@@ -372,6 +372,8 @@ async def delete_client(client_id: str, _: dict = Depends(manager_only)):
     active = await db.jobs.count_documents({"client": client_id, "status": {"$in": ["active", "todo", "review", "overdue"]}})
     if active > 0:
         raise HTTPException(status_code=400, detail=f"{active} active job(s) still linked to this client. Archive or reassign them first.")
+    # Historical (done) jobs stay in place but are marked with a deleted-client marker so they don't render broken names.
+    await db.jobs.update_many({"client": client_id}, {"$set": {"clientArchived": True}})
     await db.clients.delete_one({"id": client_id})
     return {"ok": True}
 
