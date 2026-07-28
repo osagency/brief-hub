@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
-import api from "../lib/api";
+import React, { useEffect, useRef, useState } from "react";
+import api, { API } from "../lib/api";
+import { toast } from "sonner";
 import { ROLE_EMOJI, ROLE_COLOR, fmtDate, STATUS_LABEL } from "../lib/constants";
-import { X, Send, Mail, ListChecks, MessageSquare, Bell } from "lucide-react";
+import { X, Send, Mail, ListChecks, MessageSquare, Bell, Paperclip, Upload, Trash2, FileText, ImageIcon, File as FileIcon, Loader2 } from "lucide-react";
 
 const STAGES = ["Brief", "Create", "Review", "Approve", "Deliver"];
 const STATUS_TO_STAGE = { todo: 0, active: 1, review: 2, done: 4, overdue: 1 };
@@ -12,6 +13,13 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
   const [aiKind, setAiKind] = useState(null);
   const [aiReply, setAiReply] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const reload = async () => {
+    const { data } = await api.get(`/jobs/${jobId}`);
+    setJob(data);
+  };
 
   useEffect(() => {
     if (!jobId) return;
@@ -38,8 +46,46 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
     if (!comment.trim()) return;
     await api.post(`/jobs/${job.id}/comments`, { text: comment });
     setComment("");
-    const { data } = await api.get(`/jobs/${job.id}`);
-    setJob(data);
+    await reload();
+  };
+
+  const uploadFiles = async (files) => {
+    if (!files || !files.length) return;
+    setUploading(true);
+    try {
+      for (const f of Array.from(files)) {
+        if (f.size > 25 * 1024 * 1024) {
+          toast.error(`${f.name} exceeds 25 MB`);
+          continue;
+        }
+        const fd = new FormData();
+        fd.append("file", f);
+        try {
+          await api.post(`/jobs/${job.id}/attachments`, fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          toast.success(`Uploaded ${f.name}`);
+        } catch (e) {
+          toast.error(`Failed: ${f.name} — ${e?.response?.data?.detail || e.message}`);
+        }
+      }
+      await reload();
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const deleteAttachment = async (attId) => {
+    if (!window.confirm("Delete this attachment?")) return;
+    await api.delete(`/jobs/${job.id}/attachments/${attId}`);
+    toast.success("Attachment removed");
+    await reload();
+  };
+
+  const downloadUrl = (att) => {
+    const token = localStorage.getItem("os_token");
+    return `${API}/jobs/${job.id}/attachments/${att.id}?auth=${encodeURIComponent(token)}`;
   };
 
   const runAI = async (kind) => {
@@ -95,6 +141,53 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
                   </React.Fragment>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Attachments */}
+          <div className="mb-6" data-testid="attachments-section">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[11px] uppercase mono tracking-widest text-slate-500 flex items-center gap-1"><Paperclip size={12} /> Attachments <span className="mono text-slate-400">· {(job.attachments || []).filter(a => !a.is_deleted).length}</span></div>
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} data-testid="upload-attachment-btn" className="chip status-active hover:opacity-80 disabled:opacity-50">
+                {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                {uploading ? "Uploading…" : "Upload"}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={(e) => uploadFiles(e.target.files)}
+                className="hidden"
+                data-testid="file-input"
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
+              />
+            </div>
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); uploadFiles(e.dataTransfer.files); }}
+              className="border border-dashed border-[#E5E8F0] rounded-lg p-3 min-h-[64px]"
+              data-testid="attachment-dropzone"
+            >
+              {(job.attachments || []).filter(a => !a.is_deleted).length === 0 ? (
+                <div className="text-center text-[12px] text-slate-400 py-3">Drop files here or click Upload (max 25 MB · PDF, images, docs, csv, zip)</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {(job.attachments || []).filter(a => !a.is_deleted).map((att) => {
+                    const isImg = (att.content_type || "").startsWith("image/");
+                    const Icon = isImg ? ImageIcon : ((att.content_type || "").includes("pdf") ? FileText : FileIcon);
+                    return (
+                      <div key={att.id} className="flex items-center gap-2 p-2 rounded-md border border-[#E5E8F0] bg-white" data-testid={`attachment-${att.id}`}>
+                        <div className="w-8 h-8 rounded-md flex items-center justify-center bg-slate-100 text-slate-600"><Icon size={14} /></div>
+                        <div className="flex-1 min-w-0">
+                          <a href={downloadUrl(att)} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-slate-900 hover:text-[#4361EE] truncate block" data-testid={`attachment-link-${att.id}`}>{att.filename}</a>
+                          <div className="text-[10px] mono text-slate-500">{(att.size/1024).toFixed(1)} KB · {att.uploaded_by_name} · {fmtDate(att.uploaded_at)}</div>
+                        </div>
+                        <button onClick={() => deleteAttachment(att.id)} data-testid={`delete-attachment-${att.id}`} className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50" title="Delete"><Trash2 size={13} /></button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 

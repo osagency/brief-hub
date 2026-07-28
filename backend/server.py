@@ -1,5 +1,6 @@
 """Openspace Agency OS — FastAPI backend."""
 import os
+import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -8,13 +9,15 @@ from typing import Optional
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File, Query
+from fastapi.responses import Response
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 
 import seed_data
 import ai_service
+import storage_service
 
 
 ROOT_DIR = Path(__file__).parent
@@ -559,6 +562,98 @@ async def ai_job_help(body: JobHelpIn, user: dict = Depends(current_user)):
     return {"reply": reply}
 
 
+# ---------- attachments ----------
+
+@api.post("/jobs/{job_id}/attachments")
+async def upload_attachment(job_id: str, file: UploadFile = File(...), user: dict = Depends(current_user)):
+    q = _apply_role_filter({"id": job_id}, user)
+    job = await db.jobs.find_one(q, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    data = await file.read()
+    if len(data) > storage_service.MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 25 MB limit")
+
+    content_type = file.content_type or storage_service.guess_mime(file.filename or "file")
+    if not storage_service.is_allowed_mime(content_type):
+        raise HTTPException(status_code=415, detail=f"Unsupported file type: {content_type}")
+
+    storage_path = storage_service.build_path(user["id"], file.filename or "file")
+    try:
+        result = storage_service.put_object(storage_path, data, content_type)
+    except Exception as e:
+        logger.exception("Storage upload failed")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+    attachment = {
+        "id": f"att-{uuid.uuid4().hex[:12]}",
+        "storage_path": result["path"],
+        "filename": file.filename or "file",
+        "content_type": content_type,
+        "size": len(data),
+        "uploaded_by": user["id"],
+        "uploaded_by_name": user["name"],
+        "uploaded_at": _now_iso(),
+        "is_deleted": False,
+    }
+    await db.jobs.update_one({"id": job_id}, {"$push": {"attachments": attachment}, "$set": {"updatedAt": _now_iso()}})
+    return attachment
+
+
+@api.get("/jobs/{job_id}/attachments/{attachment_id}")
+async def download_attachment(job_id: str, attachment_id: str, authorization: Optional[str] = Header(None), auth: Optional[str] = Query(None)):
+    # Support ?auth=<token> so <a href> and <img src> work without headers
+    token = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1]
+    elif auth:
+        token = auth
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing auth token")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    q = _apply_role_filter({"id": job_id}, user)
+    job = await db.jobs.find_one(q, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    att = next((a for a in job.get("attachments", []) if a.get("id") == attachment_id and not a.get("is_deleted")), None)
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    try:
+        content, _ = storage_service.get_object(att["storage_path"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download failed: {e}")
+
+    return Response(
+        content=content,
+        media_type=att.get("content_type", "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{att["filename"]}"'},
+    )
+
+
+@api.delete("/jobs/{job_id}/attachments/{attachment_id}")
+async def delete_attachment(job_id: str, attachment_id: str, user: dict = Depends(current_user)):
+    q = _apply_role_filter({"id": job_id}, user)
+    job = await db.jobs.find_one(q, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    result = await db.jobs.update_one(
+        {"id": job_id, "attachments.id": attachment_id},
+        {"$set": {"attachments.$.is_deleted": True, "updatedAt": _now_iso()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return {"ok": True}
+
+
 # ---------- health ----------
 
 @api.get("/")
@@ -580,6 +675,10 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await seed_data.seed_if_empty(db)
+    try:
+        storage_service.init_storage()
+    except Exception as e:
+        logger.warning(f"Storage init deferred (will retry lazily): {e}")
     logger.info("Seed check complete.")
 
 

@@ -1,0 +1,21 @@
+{
+  "summary": "Iteration 2 backend + frontend testing complete. 32/32 pytest tests passed in ~46s covering: auth, RBAC, invoice removal regression (GET/POST /api/invoices and POST /api/invoices/{id}/paid all return 404), seed counts (invoices excluded), jobs CRUD, and full job-attachment lifecycle against Emergent object storage. Attachment tests validated: upload response shape (id/storage_path/filename/content_type/size/uploaded_by/uploaded_by_name/uploaded_at/is_deleted:false), attachment appears in GET /api/jobs, download via ?auth=<jwt> query returns identical bytes (verified byte-equality of a real 1x1 PNG uploaded then downloaded), download via Authorization header also works, missing token returns 401, 415 on application/x-shellscript, 413 on a 26MB payload, role-scoping (arjun can upload/download/delete on OS-001 but gets 404 on OS-006), and soft-delete via DELETE (subsequent download returns 404, is_deleted flips to true). Reports /insights returns the new stats shape (jobsDone/overdue/topClient/utilisation) with no collected/pending fields. Frontend verified: nav-invoices absent from sidebar, /invoices redirects to /dashboard, dashboard no longer contains 'Finance snapshot', JobDetailModal for OS-001 shows attachments-section with Upload button and hidden data-testid='file-input', existing seeded attachment (sample.txt) rendered as a card with filename/size/uploader/delete icon.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Attachment upload reads the whole file into memory before checking size — a malicious 25MB+ upload still consumes memory before rejection. Consider streaming with a running byte counter, or setting FastAPI's per-request size limit via a middleware/ASGI hook.",
+    "storage_service._storage_key is a module-level global and not thread-safe under uvicorn workers >1; concurrent 403 auto-retry could double-init. Low impact for MVP but worth an asyncio.Lock or explicit re-init on every request.",
+    "GET /api/jobs/{id} returns soft-deleted attachments (frontend must filter). Prefer filtering server-side to avoid leaking storage_path of deleted files.",
+    "download_attachment: on jwt.PyJWTError we return 401 but the caller has no way to differentiate expired vs invalid — acceptable for MVP.",
+    "Same code-smells from iteration 1 persist: deprecated @app.on_event, seed_data.py bcrypt hashing on import."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "yusuf@osagency.in/manager123 (admin); arjun@osagency.in/team123 (team, assigned to OS-001/004/005/010/011).",
+  "seed_data_creation": "Tests upload a tiny PNG to OS-002 and a plaintext to OS-001, then delete them. Also creates TEST_topic content post, TEST timelog on OS-001, TEST_comment. All additive, none disruptive.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test module at /app/backend/tests/backend_test.py runs 32 tests in ~46s. pytest.ini has -n auto (xdist) enabled but works fine. Attachment upload endpoint returns 200 (not 201) — tests accept both. Emergent object storage is live: PUT/GET/DELETE work end-to-end and byte-for-byte round-trip is verified. Download endpoint accepts EITHER 'Authorization: Bearer <t>' header OR '?auth=<t>' query string (frontend uses the query variant for <a href> downloads). Frontend testids in JobDetailModal: attachments-section, file-input (hidden), upload-attachment-btn. The seeded job OS-001 already has an attachment 'sample.txt' at seed time — factor this in when counting."
+}
