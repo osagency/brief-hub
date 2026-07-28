@@ -20,16 +20,16 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **Multi-brand health** on Dashboard + Brief modal.
 
 ## What's Been Implemented (Feb 2026)
-- Full backend: auth, users (**full CRUD + password reset**), clients (**full CRUD**), jobs (CRUD + comments + team filter + file attachments via Emergent object storage), content posts, timelogs, approvals with decisions, KPI list/create/coaching/team-review, SOPs list/create/generate, inbox list/parse-brief/draft-reply/create-job, notifications, reports, AI assistant, job help.
-- Full frontend: 15 pages + Login + Job Detail modal + Brief modal + client/team edit-delete modals.
-- **AI Brief is now CLIENT-TAILORED (Feb 2026)** — Claude receives: (1) the client's voice guide, (2) their last 5 jobs with deliverable patterns, (3) their last 3 emails as tone samples. Briefs and gap-question emails now match each client's specific voice (Gaurav Sethi first-person, Safewater formal investor, etc.) instead of being generic.
-- SOP seed expanded to 20 entries.
+- Full backend: auth, users (full CRUD + password reset), clients (full CRUD), jobs (CRUD + comments + team filter + file attachments via Emergent object storage), content posts, timelogs, **approvals with per-card comments + reminders + revision tracking**, KPI + coaching + team-review, SOPs, inbox brief-parse/draft-reply/create-job, notifications, reports, **AI assistant + job-help + Prompt Studio + Job Templates**.
+- Full frontend: Dashboard, Inbox, Jobs, **Board (drag-and-drop)**, Calendar, **Approvals (sharper: 3-stat, filters, comments, reminders)**, Time, Clients, Manage Team, KPI, SOPs, Reports, AI, **Prompt Studio (Global/Rules/Voice/Templates)**, Vibes (**per-member brand-split pie**), Notifications. **Team members land on `/dashboard = My Day`** — hero greeting + AI standup + overdue/today/next-up sections.
+- Every AI call now uses a **dynamic system prompt** stored in Mongo — change AI Rules in the UI and every future call (brief parser, reply, coaching, chat, reports, SOP-gen, job help) instantly uses them.
+- **Client-tailored** brief AND reply drafts — Claude receives client voice + last 5 jobs + last 3 emails on each call.
+- Passing tests: iter1 30/30, iter2 32/32, iter3 44/44, **iter4 58/58** — all backend + frontend green.
 
 ## Removed / Deferred
-- **Invoice section removed entirely** (Feb 2026).
-- **Monthly revenue + client retainer amounts removed** (Feb 2026).
+- Invoice section, retainer amounts, monthly revenue — all removed.
 - Real Gmail OAuth — pending user credentials
-- Real outbound email (Resend) — pending user credentials
+- Real outbound email (Resend) — pending user credentials (reminders currently log to Mongo, no real email)
 
 ## Prioritized Backlog
 ### P1

@@ -25,7 +25,7 @@ export default function MyDay({ user }) {
   const dueToday = jobs.filter(j => j.status !== "done" && j.due === today);
   const nextUp = jobs.filter(j => ["active","todo","review"].includes(j.status) && j.due !== today).slice(0, 5);
 
-  const gitStandup = async () => {
+  const generateStandup = async () => {
     if (jobs.length === 0) return;
     setStandup({ loading: true, text: "" });
     try {

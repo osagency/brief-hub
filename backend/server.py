@@ -886,10 +886,16 @@ async def create_job_from_template(body: UseTemplateIn, _: dict = Depends(manage
 
 @api.post("/approvals/{approval_id}/comments")
 async def add_approval_comment(approval_id: str, body: ApprovalCommentIn, user: dict = Depends(current_user)):
-    comment = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": user["name"], "authorId": user["id"], "text": body.text, "at": _now_iso()}
-    result = await db.approvals.update_one({"id": approval_id}, {"$push": {"comments": comment}})
-    if result.matched_count == 0:
+    approval = await db.approvals.find_one({"id": approval_id}, {"_id": 0})
+    if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
+    # Non-manager can only comment on approvals for jobs they are assigned to
+    if not user.get("is_admin"):
+        job = await db.jobs.find_one({"id": approval.get("jobId"), "assignees": user["id"]}, {"_id": 0})
+        if not job:
+            raise HTTPException(status_code=403, detail="You can only comment on approvals for jobs you're assigned to")
+    comment = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": user["name"], "authorId": user["id"], "text": body.text, "at": _now_iso()}
+    await db.approvals.update_one({"id": approval_id}, {"$push": {"comments": comment}})
     return comment
 
 
