@@ -106,13 +106,15 @@ class JobCreate(BaseModel):
     desc: str = ""
     recurring: str = "none"
     status: str = "todo"
-
-
-class InvoiceIn(BaseModel):
+    title: str
     client: str
-    amount: int
-    desc: str
-    due: str
+    priority: str = "medium"
+    due: Optional[str] = None
+    team: list[str] = []
+    assignees: list[str] = []
+    desc: str = ""
+    recurring: str = "none"
+    status: str = "todo"
 
 
 class KPIIn(BaseModel):
@@ -307,30 +309,6 @@ async def add_comment(job_id: str, body: CommentIn, user: dict = Depends(current
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Job not found")
     return comment
-
-
-# ---------- invoices ----------
-
-@api.get("/invoices")
-async def list_invoices(_: dict = Depends(manager_only)):
-    return _clean_list(await db.invoices.find({}).sort("issued", -1).to_list(200))
-
-
-@api.post("/invoices")
-async def create_invoice(data: InvoiceIn, _: dict = Depends(manager_only)):
-    count = await db.invoices.count_documents({})
-    year = datetime.now().year
-    new_id = f"INV-{year}-{count+1:03d}"
-    doc = {"id": new_id, **data.model_dump(), "issued": datetime.now(timezone.utc).date().isoformat(), "status": "unpaid"}
-    await db.invoices.insert_one(doc)
-    return _clean(doc)
-
-
-@api.post("/invoices/{invoice_id}/paid")
-async def mark_paid(invoice_id: str, _: dict = Depends(manager_only)):
-    await db.invoices.update_one({"id": invoice_id}, {"$set": {"status": "paid"}})
-    doc = await db.invoices.find_one({"id": invoice_id})
-    return _clean(doc)
 
 
 # ---------- kpi ----------
@@ -547,13 +525,16 @@ async def mark_all_notif_read(_: dict = Depends(current_user)):
 @api.post("/reports/insights")
 async def report_insights(body: ReportIn, _: dict = Depends(manager_only)):
     jobs = await db.jobs.find({}, {"_id": 0}).to_list(500)
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(500)
+    clients = await db.clients.find({}, {"_id": 0}).to_list(50)
+    active_by_client = {c["id"]: 0 for c in clients}
+    for j in jobs:
+        if j["status"] in ("active", "todo", "review", "overdue"):
+            active_by_client[j.get("client")] = active_by_client.get(j.get("client"), 0) + 1
+    top_client = max(active_by_client.items(), key=lambda kv: kv[1], default=("—", 0))[0]
     stats = {
         "jobsDone": sum(1 for j in jobs if j["status"] == "done"),
         "overdue": sum(1 for j in jobs if j["status"] == "overdue"),
-        "collected": sum(i["amount"] for i in invoices if i["status"] == "paid"),
-        "pending": sum(i["amount"] for i in invoices if i["status"] != "paid"),
-        "topClient": max((i["client"] for i in invoices), default="—"),
+        "topClient": top_client,
         "utilisation": f"{sum(j['hours'] for j in jobs)} hrs logged",
     }
     insights = await ai_service.report_insights(body.period, stats)

@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
-import { fmtINR } from "../lib/constants";
-import { Sparkles, Printer, Loader2 } from "lucide-react";
+import { fmtINR } from "../lib/constants";import { Sparkles, Printer, Loader2 } from "lucide-react";
 
 const PERIODS = ["weekly", "monthly", "quarterly"];
 
@@ -59,11 +58,9 @@ export default function Reports() {
           </div>
 
           {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
               <Stat label="Jobs done" value={stats.jobsDone} />
               <Stat label="Overdue" value={stats.overdue} color="#EF4444" />
-              <Stat label="Collected" value={fmtINR(stats.collected)} color="#10B981" />
-              <Stat label="Pending" value={fmtINR(stats.pending)} color="#F59E0B" />
               <Stat label="Utilisation" value={stats.utilisation} />
             </div>
           )}

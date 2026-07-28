@@ -12,7 +12,6 @@ import CalendarPage from "./pages/CalendarPage";
 import Approvals from "./pages/Approvals";
 import TimeTracker from "./pages/TimeTracker";
 import Clients from "./pages/Clients";
-import Invoices from "./pages/Invoices";
 import KPI from "./pages/KPI";
 import SOPs from "./pages/SOPs";
 import Reports from "./pages/Reports";
@@ -41,7 +40,7 @@ function AppRoutes() {
       <Route path="/approvals" element={<Protected><Approvals /></Protected>} />
       <Route path="/time" element={<Protected><TimeTracker /></Protected>} />
       <Route path="/clients" element={<Protected><Clients /></Protected>} />
-      <Route path="/invoices" element={<Protected managerOnly><Invoices /></Protected>} />
+      <Route path="/invoices" element={<Navigate to="/dashboard" replace />} />
       <Route path="/kpi" element={<Protected><KPI /></Protected>} />
       <Route path="/sop" element={<Protected><SOPs /></Protected>} />
       <Route path="/reports" element={<Protected managerOnly><Reports /></Protected>} />

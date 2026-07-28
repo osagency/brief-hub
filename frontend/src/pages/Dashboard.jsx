@@ -26,7 +26,6 @@ const StatCard = ({ label, value, tone, icon: Icon, testid }) => {
 export default function Dashboard() {
   const [jobs, setJobs] = useState([]);
   const [clients, setClients] = useState([]);
-  const [invoices, setInvoices] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [users, setUsers] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
@@ -40,9 +39,6 @@ export default function Dashboard() {
         api.get("/jobs"), api.get("/clients"), api.get("/approvals"), api.get("/users"),
       ]);
       setJobs(jobsR.data); setClients(clientsR.data); setApprovals(apprR.data); setUsers(usersR.data);
-      if (u?.is_admin) {
-        try { setInvoices((await api.get("/invoices")).data); } catch {}
-      }
     };
     load();
   }, []);
@@ -68,9 +64,6 @@ export default function Dashboard() {
   const recent = [...jobs].slice(0, 7);
   const workload = users.map(u => ({ u, count: jobs.filter(j => (j.assignees || []).includes(u.id) && ["active","todo","review","overdue"].includes(j.status)).length }));
 
-  const collected = invoices.filter(i => i.status === "paid").reduce((s,i) => s + i.amount, 0);
-  const pending = invoices.filter(i => i.status === "unpaid").reduce((s,i) => s + i.amount, 0);
-  const overdueMoney = invoices.filter(i => i.status === "overdue").reduce((s,i) => s + i.amount, 0);
   const toneColor = { red: "#EF4444", yellow: "#F59E0B", blue: "#4361EE", green: "#10B981", grey: "#94A3B8" };
 
   return (
@@ -154,12 +147,19 @@ export default function Dashboard() {
           </div>
 
           {isManager && (
-            <div className="card-surface p-5" data-testid="finance-snapshot">
-              <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-3">Finance snapshot</div>
+            <div className="card-surface p-5" data-testid="monthly-retainers">
+              <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-3">Monthly retainers</div>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-slate-600">Collected</span><span className="mono text-emerald-600 font-medium">{fmtINR(collected)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-600">Pending</span><span className="mono text-amber-600 font-medium">{fmtINR(pending)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-600">Overdue</span><span className="mono text-red-600 font-medium">{fmtINR(overdueMoney)}</span></div>
+                {clients.map(c => (
+                  <div key={c.id} className="flex justify-between">
+                    <span className="text-slate-700 text-[13px]" style={{ color: c.color }}>{c.name}</span>
+                    <span className="mono text-slate-900 font-medium">{fmtINR(c.retainer)}</span>
+                  </div>
+                ))}
+                <div className="border-t border-[#E5E8F0] pt-2 mt-2 flex justify-between">
+                  <span className="text-slate-900 font-semibold text-[13px]">Total</span>
+                  <span className="mono text-emerald-600 font-semibold">{fmtINR(monthlyRevenue)}</span>
+                </div>
               </div>
             </div>
           )}

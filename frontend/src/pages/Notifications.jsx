@@ -2,13 +2,12 @@ import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
 import { fmtDate } from "../lib/constants";
-import { Bell, Mail, RotateCw, AlertTriangle, Receipt, CheckCircle2, TrendingUp } from "lucide-react";
+import { Bell, Mail, RotateCw, AlertTriangle, CheckCircle2, TrendingUp } from "lucide-react";
 
 const ICONS = {
   overdue: { icon: AlertTriangle, bg: "#FEE2E2", fg: "#EF4444" },
   email: { icon: Mail, bg: "#DBEAFE", fg: "#4361EE" },
   revision: { icon: RotateCw, bg: "#FEF3C7", fg: "#F59E0B" },
-  invoice: { icon: Receipt, bg: "#FEE2E2", fg: "#EF4444" },
   approval: { icon: CheckCircle2, bg: "#D1FAE5", fg: "#10B981" },
   kpi: { icon: TrendingUp, bg: "#EDE9FE", fg: "#8B5CF6" },
 };

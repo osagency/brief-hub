@@ -200,9 +200,7 @@ REPORT_PROMPT = """Generate a {period} agency insight for Openspace. Return 5 sh
 DATA:
 - Total jobs done: {jobsDone}
 - Overdue: {overdue}
-- Revenue collected: ₹{collected}
-- Revenue pending: ₹{pending}
-- Top client by revenue: {topClient}
+- Top client by active-job load: {topClient}
 - Team utilisation: {utilisation}
 
 Focus on: what worked, what didn't, one risk, one client to watch, one recommended action."""

@@ -49,14 +49,7 @@ JOBS = [
     {"id": "OS-012", "title": "SmartCo LinkedIn Ads Refresh", "client": "smartco", "priority": "medium", "status": "active", "due": _days(4), "progress": 45, "team": ["mktg", "designer"], "recurring": "none", "desc": "New LinkedIn ad creatives + audience refresh.", "hours": 6, "revisions": 0, "scopeAdded": 0, "comments": [], "assignees": ["u_kavya", "u_priya"]},
 ]
 
-INVOICES = [
-    {"id": "INV-2026-001", "client": "galalite", "amount": 85000, "desc": "January 2026 retainer", "due": _days(-10), "issued": _days(-40), "status": "paid"},
-    {"id": "INV-2026-002", "client": "lumina", "amount": 45000, "desc": "January 2026 retainer", "due": _days(-5), "issued": _days(-35), "status": "paid"},
-    {"id": "INV-2026-003", "client": "tkpl", "amount": 55000, "desc": "February 2026 retainer", "due": _days(5), "issued": _days(-5), "status": "unpaid"},
-    {"id": "INV-2026-004", "client": "intercont", "amount": 60000, "desc": "February 2026 retainer", "due": _days(-8), "issued": _days(-18), "status": "overdue"},
-    {"id": "INV-2026-005", "client": "safewater", "amount": 40000, "desc": "February 2026 retainer", "due": _days(10), "issued": _days(-2), "status": "unpaid"},
-    {"id": "INV-2026-006", "client": "smartco", "amount": 35000, "desc": "March 2026 retainer (advance)", "due": _days(25), "issued": _days(-1), "status": "unpaid"},
-]
+INVOICES = []  # deprecated: invoice section removed from app
 
 KPI = [
     {"id": str(uuid.uuid4()), "memberId": "u_priya", "period": "monthly", "periodLabel": "Jan 2026", "jobsDone": 14, "onTime": 92, "quality": 9.3, "csat": 9.1, "deadline": 9.2, "comm": 8.8, "initiative": 9.0, "collab": 9.4, "good": "Exceptional turnaround on the Galalite carousel work. Clients specifically praised design polish.", "improve": "Push back earlier on scope creep instead of absorbing extra revisions silently.", "actions": ["Flag scope creep same-day", "Share design refs with writer earlier"], "trend": [8.6, 8.9, 9.0, 9.1]},
@@ -116,7 +109,7 @@ NOTIFICATIONS = [
     {"id": "n-1", "title": "TKPL Trade Show — overdue", "subtitle": "Job OS-009 crossed its due date 3 days ago", "time": _days(0), "type": "overdue", "read": False},
     {"id": "n-2", "title": "New email from Gaurav (Intercont+)", "subtitle": "LinkedIn post request for tomorrow", "time": _days(0), "type": "email", "read": False},
     {"id": "n-3", "title": "Lumina requested revision", "subtitle": "Website speed job — homepage hero delay", "time": _days(-1), "type": "revision", "read": False},
-    {"id": "n-4", "title": "Invoice INV-2026-004 overdue", "subtitle": "Intercont+ payment ₹60,000 overdue by 8 days", "time": _days(-2), "type": "invoice", "read": True},
+    {"id": "n-4", "title": "TKPL asked to expand product page", "subtitle": "OS-003 scope expanded — pricing tables and downloads", "time": _days(-2), "type": "revision", "read": True},
     {"id": "n-5", "title": "SmartCo approved SEO report", "subtitle": "Job OS-006 approved — ready to send", "time": _days(-3), "type": "approval", "read": True},
     {"id": "n-6", "title": "Priya hit a monthly KPI streak", "subtitle": "3 months above 9.0 — nice", "time": _days(-4), "type": "kpi", "read": True},
 ]
@@ -137,7 +130,7 @@ async def seed_if_empty(db):
             docs.append(d)
         await db.jobs.insert_many(docs)
     if await db.invoices.count_documents({}) == 0:
-        await db.invoices.insert_many([{**i} for i in INVOICES])
+        pass  # invoices section removed
     if await db.kpi.count_documents({}) == 0:
         await db.kpi.insert_many([{**k} for k in KPI])
     if await db.sops.count_documents({}) == 0:

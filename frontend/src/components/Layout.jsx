@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Inbox, CalendarClock, Bell, Briefcase, KanbanSquare,
-  Calendar, CheckCircle2, Timer, Users, Receipt, LineChart, BookOpen,
-  BarChart3, Sparkles, Trophy, LogOut, Search, ChevronDown
+  LayoutDashboard, Inbox, Bell, Briefcase, KanbanSquare,
+  Calendar, CheckCircle2, Timer, Users, LineChart, BookOpen,
+  BarChart3, Sparkles, Trophy, LogOut, Search
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
@@ -31,7 +31,6 @@ const SECTIONS = [
     label: "Clients",
     items: [
       { to: "/clients", label: "Clients", icon: Users, testid: "nav-clients" },
-      { to: "/invoices", label: "Invoices", icon: Receipt, badge: "invoices", testid: "nav-invoices", managerOnly: true },
     ],
   },
   {
@@ -57,7 +56,6 @@ function Badge({ kind, counts }) {
     notif: { count: counts.notifUnread, className: "bg-red-500 text-white" },
     jobs: { count: counts.activeJobs, className: "bg-[#4361EE] text-white" },
     approvals: { count: counts.approvalsPending, className: "bg-amber-500 text-white" },
-    invoices: { count: counts.invoicesOverdue, className: "bg-red-500 text-white" },
   };
   const b = map[kind];
   if (!b || !b.count) return null;
@@ -70,12 +68,12 @@ function Badge({ kind, counts }) {
 
 export default function Layout({ children }) {
   const { user, logout, isManager } = useAuth();
-  const [counts, setCounts] = useState({ inboxUnread: 0, notifUnread: 0, activeJobs: 0, approvalsPending: 0, invoicesOverdue: 0 });
+  const [counts, setCounts] = useState({ inboxUnread: 0, notifUnread: 0, activeJobs: 0, approvalsPending: 0 });
   const location = useLocation();
 
   useEffect(() => {
     const load = async () => {
-      const c = { inboxUnread: 0, notifUnread: 0, activeJobs: 0, approvalsPending: 0, invoicesOverdue: 0 };
+      const c = { inboxUnread: 0, notifUnread: 0, activeJobs: 0, approvalsPending: 0 };
       try {
         const [jobs, notifs, approvals] = await Promise.all([
           api.get("/jobs"), api.get("/notifications"), api.get("/approvals"),
@@ -84,9 +82,8 @@ export default function Layout({ children }) {
         c.notifUnread = notifs.data.filter((n) => !n.read).length;
         c.approvalsPending = approvals.data.filter((a) => a.status === "pending").length;
         if (isManager) {
-          const [inbox, invoices] = await Promise.all([api.get("/inbox"), api.get("/invoices")]);
+          const inbox = await api.get("/inbox");
           c.inboxUnread = inbox.data.filter((e) => !e.read).length;
-          c.invoicesOverdue = invoices.data.filter((i) => i.status === "overdue").length;
         }
       } catch {}
       setCounts(c);
