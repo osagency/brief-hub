@@ -21,13 +21,13 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 
 ## What's Been Implemented (Feb 2026)
 - Full backend: auth, users (**full CRUD + password reset**), clients (**full CRUD**), jobs (CRUD + comments + team filter + file attachments via Emergent object storage), content posts, timelogs, approvals with decisions, KPI list/create/coaching/team-review, SOPs list/create/generate, inbox list/parse-brief/draft-reply/create-job, notifications, reports, AI assistant, job help.
-- Full frontend: 15 pages (Dashboard, Inbox, Jobs, Board, Calendar, Approvals, Time, Clients, **Manage Team**, KPI, SOPs, Reports, AI, Vibes, Notifications) + Login + Job Detail modal + Brief modal + client/team edit-delete modals.
-- Passing tests: **iteration 1**: 30/30 backend + 100% frontend. **iteration 2**: 32/32 backend + 100% frontend. **iteration 3**: 44/44 backend + 100% frontend.
-- **SOP seed expanded to 20 entries** — covers all 5 roles + escalation + scope-creep.
+- Full frontend: 15 pages + Login + Job Detail modal + Brief modal + client/team edit-delete modals.
+- **AI Brief is now CLIENT-TAILORED (Feb 2026)** — Claude receives: (1) the client's voice guide, (2) their last 5 jobs with deliverable patterns, (3) their last 3 emails as tone samples. Briefs and gap-question emails now match each client's specific voice (Gaurav Sethi first-person, Safewater formal investor, etc.) instead of being generic.
+- SOP seed expanded to 20 entries.
 
 ## Removed / Deferred
 - **Invoice section removed entirely** (Feb 2026).
-- **Monthly revenue + client retainer amounts removed** (Feb 2026): Dashboard now shows Done-this-month + Jobs-per-client; Clients no longer show retainer; TimeTracker shows Hours-per-client instead of Profitability. AI system prompt no longer includes rupee amounts.
+- **Monthly revenue + client retainer amounts removed** (Feb 2026).
 - Real Gmail OAuth — pending user credentials
 - Real outbound email (Resend) — pending user credentials
 

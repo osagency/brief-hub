@@ -70,19 +70,35 @@ def _extract_json(text: str) -> dict:
 BRIEF_PROMPT = """You are parsing an incoming client email for Openspace agency.
 
 Your job has THREE parts:
-1. Extract everything that IS clear and build the project brief
+1. Extract everything that IS clear and build a TAILORED project brief that sounds like it was made for THIS specific client (match their voice, respect their tone, reference their past work where relevant)
 2. Identify everything that is MISSING or VAGUE that we cannot brief the team without
-3. Draft a professional follow-up email to the client asking ONLY the missing questions — warmly, clearly, in one email under 150 words, maximum 5 questions
+3. Draft a professional follow-up email to the client asking ONLY the missing questions — warmly, clearly, in one email under 150 words, maximum 5 questions, WRITTEN IN THIS CLIENT'S VOICE
 
 Return ONLY valid JSON. No markdown. No explanation.
 
-CLIENT EMAIL:
+===== CLIENT CONTEXT (use this to tailor the brief) =====
+CLIENT: {client_name} (id: {client_id})
+VOICE & TONE GUIDE: {client_voice}
+DELIVERABLE PATTERNS FROM PAST WORK:
+{recent_jobs_block}
+HOW THIS CLIENT TYPICALLY WRITES:
+{prior_emails_block}
+===== END CLIENT CONTEXT =====
+
+CURRENT TEAM WORKLOAD (active jobs per person): {workload}
+
+CLIENT EMAIL TO PARSE:
 \"\"\"
 {email_body}
 \"\"\"
 
-CLIENT: {client_name} (id: {client_id})
-CURRENT TEAM WORKLOAD (active jobs per person): {workload}
+INSTRUCTIONS:
+- The `brief` field MUST reference this specific client's voice/tone (from the guide above). Do NOT write a generic brief.
+- The `deliverables` MUST match how this client structures work (see past-work patterns above). If they've asked for carousels before with 5 slides, and this looks similar, match that format.
+- The `toneAndStyle` field MUST directly quote or paraphrase the client's voice guide.
+- The `gapQuestionEmail.body` MUST be written in a tone that mirrors how the client writes (formal vs. casual, first-person vs. third-person, direct vs. warm) — see prior emails above.
+- If the client uses first-person (like Gaurav Sethi at Intercont+), the reply should also be in first person and personal.
+- Do NOT hallucinate deliverables the client did not mention.
 
 Return this JSON structure:
 {{
@@ -92,9 +108,9 @@ Return this JSON structure:
     "client": "{client_id}",
     "priority": "high | medium | low",
     "deadline": "YYYY-MM-DD or null",
-    "brief": "2-3 sentences",
+    "brief": "2-3 sentences — TAILORED to this client's voice/tone",
     "deliverables": ["item1", "item2"],
-    "toneAndStyle": "string",
+    "toneAndStyle": "string — must reference the client voice guide",
     "isWithinRetainerScope": true,
     "scopeNote": "string or null"
   }},
@@ -116,7 +132,7 @@ Return this JSON structure:
   "gapQuestionEmail": {{
     "to": "client email",
     "subject": "string",
-    "body": "full email text"
+    "body": "full email text — WRITTEN IN THIS CLIENT'S VOICE"
   }},
   "priorityScore": 1,
   "workloadWarning": "string or null",
@@ -125,11 +141,42 @@ Return this JSON structure:
 }}"""
 
 
-async def parse_brief(email_body: str, client_id: str, client_name: str, client_email: str, workload: dict) -> dict:
+def _format_recent_jobs(jobs: list) -> str:
+    if not jobs:
+        return "(none on file yet — this may be the first job for this client)"
+    lines = []
+    for j in jobs[:5]:
+        lines.append(f"- \"{j.get('title','?')}\" · priority {j.get('priority','?')} · deliverable pattern: {j.get('desc','')[:120]} · revisions: {j.get('revisions',0)}")
+    return "\n".join(lines)
+
+
+def _format_prior_emails(emails: list) -> str:
+    if not emails:
+        return "(no prior emails on file for this client)"
+    lines = []
+    for e in emails[:3]:
+        body = (e.get("body") or "").replace("\n", " ").strip()
+        lines.append(f"- Subject: \"{e.get('subject','')}\"\n  Excerpt: \"{body[:220]}...\"")
+    return "\n".join(lines)
+
+
+async def parse_brief(
+    email_body: str,
+    client_id: str,
+    client_name: str,
+    client_email: str,
+    client_voice: str,
+    workload: dict,
+    recent_jobs: list | None = None,
+    prior_emails: list | None = None,
+) -> dict:
     prompt = BRIEF_PROMPT.format(
         email_body=email_body,
         client_id=client_id,
         client_name=client_name,
+        client_voice=client_voice or "(no voice guide on file — match the client's own writing style from prior emails)",
+        recent_jobs_block=_format_recent_jobs(recent_jobs or []),
+        prior_emails_block=_format_prior_emails(prior_emails or []),
         workload=json.dumps(workload),
     )
     chat = _new_chat(f"brief-{client_id}")

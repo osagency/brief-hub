@@ -593,13 +593,34 @@ async def parse_brief(body: BriefParseIn, _: dict = Depends(manager_only)):
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     client = await db.clients.find_one({"id": email["clientId"]}, {"_id": 0})
-    # workload
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Team workload snapshot
     users = await db.users.find({}, {"_id": 0}).to_list(50)
     workload = {}
     for u in users:
         active_count = await db.jobs.count_documents({"assignees": u["id"], "status": {"$in": ["active", "todo", "review", "overdue"]}})
         workload[u["role_key"]] = active_count
-    result = await ai_service.parse_brief(email["body"], email["clientId"], client["name"], client["email"], workload)
+
+    # Tailored context: recent jobs + prior emails from THIS client
+    recent_jobs = await db.jobs.find(
+        {"client": client["id"]}, {"_id": 0}
+    ).sort("createdAt", -1).to_list(5)
+    prior_emails = await db.inbox.find(
+        {"clientId": client["id"], "id": {"$ne": body.emailId}}, {"_id": 0}
+    ).sort("time", -1).to_list(3)
+
+    result = await ai_service.parse_brief(
+        email_body=email["body"],
+        client_id=client["id"],
+        client_name=client["name"],
+        client_email=client["email"],
+        client_voice=client.get("voice", ""),
+        workload=workload,
+        recent_jobs=recent_jobs,
+        prior_emails=prior_emails,
+    )
     return result
 
 
