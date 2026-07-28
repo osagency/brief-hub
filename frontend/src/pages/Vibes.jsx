@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
-import { QUOTES, XP_LEVEL, avatarFor } from "../lib/constants";
+import { AVATAR, QUOTES, XP_LEVEL, avatarFor } from "../lib/constants";
 import { Crown, RotateCw, Trophy, Flame } from "lucide-react";
 
 const BADGES = {
@@ -18,19 +18,43 @@ export default function Vibes() {
   const [users, setUsers] = useState([]);
   const [kpi, setKpi] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [clients, setClients] = useState([]);
   const [qIdx, setQIdx] = useState(0);
 
   useEffect(() => {
-    Promise.all([api.get("/users"), api.get("/kpi", { params: { period: "monthly" } }), api.get("/jobs")])
-      .then(([u,k,j]) => { setUsers(u.data); setKpi(k.data); setJobs(j.data); });
+    Promise.all([api.get("/users"), api.get("/kpi", { params: { period: "monthly" } }), api.get("/jobs"), api.get("/timelogs"), api.get("/clients")])
+      .then(([u,k,j,l,c]) => { setUsers(u.data); setKpi(k.data); setJobs(j.data); setLogs(l.data); setClients(c.data); });
   }, []);
+
+  // Time this week (last 7 days) per user per client
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const clientById = Object.fromEntries(clients.map(c => [c.id, c]));
+
+  const weekBreakdown = (userId) => {
+    const userLogs = logs.filter(l => l.person === userId && new Date(l.date) >= weekAgo);
+    const byClient = {};
+    userLogs.forEach(l => {
+      const j = jobs.find(x => x.id === l.jobId);
+      if (!j) return;
+      byClient[j.client] = (byClient[j.client] || 0) + l.hours;
+    });
+    // Also seed a small amount from active jobs (so pie is non-empty even without logs)
+    if (Object.keys(byClient).length === 0) {
+      jobs.filter(j => (j.assignees || []).includes(userId) && ["active","todo","review","overdue"].includes(j.status))
+        .forEach(j => { byClient[j.client] = (byClient[j.client] || 0) + 1; });
+    }
+    return byClient;
+  };
 
   const withScore = users.filter(u => u.id !== "u_yusuf").map(u => {
     const e = kpi.find(x => x.memberId === u.id);
     const s = e ? scoreOf(e) : 0;
     const active = jobs.filter(j => (j.assignees || []).includes(u.id) && ["active","todo","review","overdue"].includes(j.status)).length;
     const done = jobs.filter(j => (j.assignees || []).includes(u.id) && j.status === "done").length;
-    return { u, score: s, active, done };
+    const breakdown = weekBreakdown(u.id);
+    return { u, score: s, active, done, breakdown };
   }).sort((a,b) => b.score - a.score);
 
   const quote = QUOTES[qIdx % QUOTES.length];
@@ -103,6 +127,23 @@ export default function Vibes() {
                 <div><div className="text-[10px] mono text-slate-500 uppercase tracking-widest">Done</div><div className="mono text-lg text-emerald-600">{x.done}</div></div>
               </div>
 
+              <div className="mt-4">
+                <div className="text-[10px] uppercase mono tracking-widest text-slate-500 mb-2">Week split · by brand</div>
+                <div className="flex items-center gap-3">
+                  <BrandPie breakdown={x.breakdown} clientById={clientById} testid={`pie-${x.u.id}`} />
+                  <div className="flex-1 space-y-1">
+                    {Object.entries(x.breakdown).map(([cid, v]) => (
+                      <div key={cid} className="flex items-center gap-1.5 text-[11px]">
+                        <span className="w-2 h-2 rounded-full" style={{ background: clientById[cid]?.color || "#94A3B8" }} />
+                        <span className="text-slate-700 flex-1 truncate">{clientById[cid]?.name || "—"}</span>
+                        <span className="mono text-slate-500">{v}</span>
+                      </div>
+                    ))}
+                    {Object.keys(x.breakdown).length === 0 && <div className="text-[11px] text-slate-400 italic">No work this week</div>}
+                  </div>
+                </div>
+              </div>
+
               <div className="mt-3">
                 <div className="flex justify-between text-[11px] mono text-slate-500"><span>XP · {level}</span><span>{x.score.toFixed(1)}/10</span></div>
                 <div className="h-2 bg-slate-100 rounded-full mt-1 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${xpPct}%`, background: "linear-gradient(90deg, #8B5CF6, #EC4899)" }} /></div>
@@ -116,5 +157,42 @@ export default function Vibes() {
         })}
       </div>
     </div>
+  );
+}
+
+function BrandPie({ breakdown, clientById, testid }) {
+  const entries = Object.entries(breakdown);
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+  const size = 72;
+  const r = 32;
+  const cx = size / 2;
+  const cy = size / 2;
+  if (total === 0) {
+    return (
+      <svg width={size} height={size} data-testid={testid}>
+        <circle cx={cx} cy={cy} r={r} fill="#F1F5F9" />
+      </svg>
+    );
+  }
+  let acc = 0;
+  const arcs = entries.map(([cid, v]) => {
+    const start = (acc / total) * Math.PI * 2 - Math.PI / 2;
+    acc += v;
+    const end = (acc / total) * Math.PI * 2 - Math.PI / 2;
+    const large = end - start > Math.PI ? 1 : 0;
+    const x1 = cx + r * Math.cos(start);
+    const y1 = cy + r * Math.sin(start);
+    const x2 = cx + r * Math.cos(end);
+    const y2 = cy + r * Math.sin(end);
+    const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+    return { cid, d };
+  });
+  return (
+    <svg width={size} height={size} data-testid={testid}>
+      {arcs.map(a => (
+        <path key={a.cid} d={a.d} fill={clientById[a.cid]?.color || "#94A3B8"} stroke="white" strokeWidth={1} />
+      ))}
+      <circle cx={cx} cy={cy} r={14} fill="white" />
+    </svg>
   );
 }

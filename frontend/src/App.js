@@ -19,6 +19,8 @@ import Reports from "./pages/Reports";
 import AIAssistant from "./pages/AIAssistant";
 import Vibes from "./pages/Vibes";
 import Notifications from "./pages/Notifications";
+import PromptStudio from "./pages/PromptStudio";
+import MyDay from "./pages/MyDay";
 import "./App.css";
 
 function Protected({ children, managerOnly }) {
@@ -28,12 +30,18 @@ function Protected({ children, managerOnly }) {
   return <Layout>{children}</Layout>;
 }
 
+function DashboardOrMyDay() {
+  const { user } = useAuth();
+  if (!user?.is_admin) return <MyDay user={user} />;
+  return <Dashboard />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/dashboard" element={<Protected><DashboardOrMyDay /></Protected>} />
       <Route path="/inbox" element={<Protected managerOnly><Inbox /></Protected>} />
       <Route path="/jobs" element={<Protected><Jobs /></Protected>} />
       <Route path="/board" element={<Protected><Board /></Protected>} />
@@ -48,6 +56,7 @@ function AppRoutes() {
       <Route path="/ai" element={<Protected><AIAssistant /></Protected>} />
       <Route path="/vibes" element={<Protected><Vibes /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
+      <Route path="/prompts" element={<Protected managerOnly><PromptStudio /></Protected>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

@@ -509,3 +509,219 @@ class TestUserCRUD:
         assert r.status_code == 400
         detail = r.json().get("detail", "")
         assert "active" in detail.lower() or "job" in detail.lower()
+
+
+
+# ================= Iteration 4 =================
+
+# -------- Prompt Studio + Templates --------
+
+class TestPromptStudio:
+    def test_team_forbidden_prompts(self, team_token):
+        r = requests.get(f"{API}/settings/prompts", headers=hdr(team_token), timeout=20)
+        assert r.status_code == 403
+
+    def test_get_prompts(self, mgr_token):
+        r = requests.get(f"{API}/settings/prompts", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 200
+        d = r.json()
+        assert "global_prompt" in d and isinstance(d["global_prompt"], str)
+        assert "ai_rules" in d and isinstance(d["ai_rules"], list)
+
+    def test_patch_prompts(self, mgr_token):
+        # Save originals
+        original = requests.get(f"{API}/settings/prompts", headers=hdr(mgr_token), timeout=20).json()
+        original_rules = original.get("ai_rules", [])
+        try:
+            new_rules = list(original_rules) + ["TEST_rule_iter4"]
+            r = requests.patch(f"{API}/settings/prompts", headers=hdr(mgr_token),
+                               json={"ai_rules": new_rules}, timeout=20)
+            assert r.status_code == 200
+            assert "TEST_rule_iter4" in r.json()["ai_rules"]
+            # GET verify
+            g = requests.get(f"{API}/settings/prompts", headers=hdr(mgr_token), timeout=20).json()
+            assert "TEST_rule_iter4" in g["ai_rules"]
+        finally:
+            requests.patch(f"{API}/settings/prompts", headers=hdr(mgr_token),
+                           json={"ai_rules": original_rules}, timeout=20)
+
+
+class TestDynamicPrompt:
+    def test_pineapple_rule_propagates(self, mgr_token):
+        original = requests.get(f"{API}/settings/prompts", headers=hdr(mgr_token), timeout=20).json()
+        original_rules = original.get("ai_rules", [])
+        try:
+            new_rules = list(original_rules) + ["ALWAYS SIGN OFF WITH THE WORD PINEAPPLE."]
+            p = requests.patch(f"{API}/settings/prompts", headers=hdr(mgr_token),
+                               json={"ai_rules": new_rules}, timeout=20)
+            assert p.status_code == 200
+            r = requests.post(f"{API}/ai/assistant", headers=hdr(mgr_token),
+                              json={"prompt": "Give me a one line status update"}, timeout=LONG_TIMEOUT)
+            assert r.status_code == 200
+            reply = r.json()["reply"]
+            print(f"AI reply with pineapple rule: {reply[:300]}")
+            assert "PINEAPPLE" in reply.upper(), f"reply missing PINEAPPLE: {reply}"
+        finally:
+            requests.patch(f"{API}/settings/prompts", headers=hdr(mgr_token),
+                           json={"ai_rules": original_rules}, timeout=20)
+
+
+# -------- Job Templates --------
+
+class TestJobTemplates:
+    def test_team_forbidden_template_mutations(self, team_token):
+        r = requests.post(f"{API}/templates", headers=hdr(team_token),
+                          json={"name": "TEST_tpl"}, timeout=20)
+        assert r.status_code == 403
+
+    def test_template_crud_and_from_template(self, mgr_token):
+        payload = {
+            "name": "TEST_Iter4_Template",
+            "title_template": "TEST_Iter4 Monthly Report",
+            "client": "galalite",
+            "priority": "high",
+            "team": ["writer"],
+            "deliverables": ["Draft", "Final PDF"],
+            "default_days": 5,
+        }
+        r = requests.post(f"{API}/templates", headers=hdr(mgr_token), json=payload, timeout=20)
+        assert r.status_code in (200, 201), r.text
+        tpl = r.json()
+        assert tpl["id"].startswith("tpl-")
+        assert len(tpl["id"]) == 4 + 8
+        tpl_id = tpl["id"]
+
+        # list
+        lst = requests.get(f"{API}/templates", headers=hdr(mgr_token), timeout=20).json()
+        assert any(t["id"] == tpl_id for t in lst)
+
+        # patch
+        patched = requests.patch(f"{API}/templates/{tpl_id}", headers=hdr(mgr_token),
+                                 json={**payload, "priority": "low"}, timeout=20)
+        assert patched.status_code == 200
+        assert patched.json()["priority"] == "low"
+
+        # use template -> job
+        use = requests.post(f"{API}/jobs/from-template", headers=hdr(mgr_token),
+                            json={"template_id": tpl_id}, timeout=20)
+        assert use.status_code == 200, use.text
+        job = use.json()
+        assert job["id"].startswith("OS-")
+        assert job["priority"] == "low"
+        assert job["client"] == "galalite"
+        assert job["deliverables"] == ["Draft", "Final PDF"]
+        assert job["title"] == "TEST_Iter4 Monthly Report"
+        assert job["fromTemplate"] == tpl_id
+        new_job_id = job["id"]
+
+        # verify job exists via GET
+        g = requests.get(f"{API}/jobs/{new_job_id}", headers=hdr(mgr_token), timeout=20)
+        assert g.status_code == 200
+
+        # cleanup: delete the job (via patch to done + delete not exposed; leave it — or DELETE job if endpoint exists)
+        # try DELETE job
+        del_job = requests.delete(f"{API}/jobs/{new_job_id}", headers=hdr(mgr_token), timeout=20)
+        # may not exist; not critical
+
+        # delete template
+        d = requests.delete(f"{API}/templates/{tpl_id}", headers=hdr(mgr_token), timeout=20)
+        assert d.status_code == 200
+
+        # 404 on gone
+        g2 = requests.delete(f"{API}/templates/{tpl_id}", headers=hdr(mgr_token), timeout=20)
+        assert g2.status_code == 404
+
+
+# -------- Approvals: comments + reminders --------
+
+class TestApprovalsSharp:
+    def test_add_comment_as_manager(self, mgr_token):
+        r = requests.post(f"{API}/approvals/ap-2/comments", headers=hdr(mgr_token),
+                          json={"text": "TEST_mgr_comment_iter4"}, timeout=20)
+        assert r.status_code == 200
+        c = r.json()
+        assert c["id"].startswith("ac-")
+        assert c["text"] == "TEST_mgr_comment_iter4"
+        assert "authorId" in c and "author" in c and "at" in c
+
+    def test_add_comment_as_team(self, team_token):
+        # team can post comments
+        r = requests.post(f"{API}/approvals/ap-2/comments", headers=hdr(team_token),
+                          json={"text": "TEST_team_comment_iter4"}, timeout=20)
+        assert r.status_code == 200
+        assert r.json()["text"] == "TEST_team_comment_iter4"
+
+    def test_reminder_manager_only(self, mgr_token, team_token):
+        # team forbidden
+        rt = requests.post(f"{API}/approvals/ap-2/reminder", headers=hdr(team_token), timeout=20)
+        assert rt.status_code == 403
+
+        # get baseline
+        approvals = requests.get(f"{API}/approvals", headers=hdr(mgr_token), timeout=20).json()
+        target = next(a for a in approvals if a["id"] == "ap-2")
+        before = target.get("reminder_count", 0) or 0
+
+        r = requests.post(f"{API}/approvals/ap-2/reminder", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 200
+        d = r.json()
+        assert d.get("reminder_count", 0) == before + 1
+        assert d.get("last_reminder_at")
+
+    def test_reminder_404(self, mgr_token):
+        r = requests.post(f"{API}/approvals/nope-xxx/reminder", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 404
+
+
+# -------- Tailored AI (draft reply + brief parser regression) --------
+
+class TestTailoredAI:
+    def test_draft_reply_e1(self, mgr_token):
+        r = requests.post(f"{API}/inbox/draft-reply", headers=hdr(mgr_token),
+                          json={"emailId": "e-1"}, timeout=LONG_TIMEOUT)
+        assert r.status_code == 200, r.text
+        reply = r.json().get("reply", "")
+        print(f"draft-reply e-1: {reply[:400]}")
+        assert len(reply) > 60, f"reply too short: {reply}"
+
+    def test_parse_brief_e1_tone(self, mgr_token):
+        r = requests.post(f"{API}/inbox/parse-brief", headers=hdr(mgr_token),
+                          json={"emailId": "e-1"}, timeout=LONG_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        tone = (d.get("briefSummary", {}) or {}).get("toneAndStyle", "") or ""
+        # nested may differ; also check top-level
+        if not tone:
+            tone = d.get("toneAndStyle", "") or ""
+        combined = str(d).lower()
+        print(f"parse-brief e-1 tone: {tone[:200]}")
+        assert any(k in combined for k in ["first-person", "first person", "gaurav", "personal"]), \
+            f"e-1 tone missing personal/first-person markers: {combined[:400]}"
+
+    def test_parse_brief_e5_tone(self, mgr_token):
+        r = requests.post(f"{API}/inbox/parse-brief", headers=hdr(mgr_token),
+                          json={"emailId": "e-5"}, timeout=LONG_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        combined = str(d).lower()
+        print(f"parse-brief e-5: {combined[:400]}")
+        assert any(k in combined for k in ["formal", "investor", "data-driven", "data driven"]), \
+            f"e-5 tone missing formal/investor/data-driven: {combined[:400]}"
+
+
+# -------- Kanban drag: PATCH /api/jobs status --------
+
+class TestBoardDragPatch:
+    def test_patch_status(self, mgr_token):
+        # find an active job
+        jobs = requests.get(f"{API}/jobs", headers=hdr(mgr_token), timeout=20).json()
+        job = next(j for j in jobs if j["status"] in ("todo", "active", "in_progress"))
+        jid = job["id"]
+        orig = job["status"]
+        target = "review" if orig != "review" else "active"
+        r = requests.patch(f"{API}/jobs/{jid}", headers=hdr(mgr_token),
+                           json={"status": target}, timeout=20)
+        assert r.status_code == 200
+        g = requests.get(f"{API}/jobs/{jid}", headers=hdr(mgr_token), timeout=20).json()
+        assert g["status"] == target
+        # revert
+        requests.patch(f"{API}/jobs/{jid}", headers=hdr(mgr_token), json={"status": orig}, timeout=20)

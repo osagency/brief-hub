@@ -240,6 +240,35 @@ class PasswordReset(BaseModel):
     new_password: str = Field(min_length=6)
 
 
+class PromptSettingsIn(BaseModel):
+    global_prompt: Optional[str] = None
+    ai_rules: Optional[list[str]] = None
+
+
+class JobTemplateIn(BaseModel):
+    name: str
+    title_template: str = ""  # e.g. "Monthly SEO Report — {month}"
+    client: Optional[str] = None
+    priority: str = "medium"
+    recurring: str = "none"
+    team: list[str] = []
+    assignees: list[str] = []
+    desc: str = ""
+    deliverables: list[str] = []
+    default_days: int = 7
+
+
+class UseTemplateIn(BaseModel):
+    template_id: str
+    title: Optional[str] = None
+    client: Optional[str] = None
+    due: Optional[str] = None
+
+
+class ApprovalCommentIn(BaseModel):
+    text: str
+
+
 # ---------- auth ----------
 
 @api.post("/auth/login")
@@ -485,7 +514,7 @@ async def kpi_coaching(body: CoachingIn, _: dict = Depends(manager_only)):
     if not entry:
         raise HTTPException(status_code=404, detail="KPI entry not found")
     member = await db.users.find_one({"id": entry["memberId"]}, {"_id": 0})
-    advice = await ai_service.coaching_advice(entry, member["name"], member["role_label"])
+    advice = await ai_service.coaching_advice(entry, member["name"], member["role_label"], system_prompt=await build_active_system_prompt())
     return {"advice": advice}
 
 
@@ -494,7 +523,7 @@ async def kpi_team_review(_: dict = Depends(manager_only)):
     entries = await db.kpi.find({"period": "monthly"}, {"_id": 0}).to_list(50)
     users = await db.users.find({}, {"_id": 0}).to_list(50)
     members = {u["id"]: u for u in users}
-    review = await ai_service.team_review(entries, members)
+    review = await ai_service.team_review(entries, members, system_prompt=await build_active_system_prompt())
     return {"review": review}
 
 
@@ -516,7 +545,7 @@ async def create_sop(data: SOPIn, _: dict = Depends(manager_only)):
 @api.post("/sops/generate")
 async def generate_sop(body: SOPGenIn, _: dict = Depends(manager_only)):
     import uuid
-    data = await ai_service.sop_generate(body.topic)
+    data = await ai_service.sop_generate(body.topic, system_prompt=await build_active_system_prompt())
     doc = {"id": f"sop-{str(uuid.uuid4())[:8]}", "title": data.get("title", body.topic), "role": data.get("role", "manager"), "time": data.get("time", "1 hr"), "steps": data.get("steps", [])}
     await db.sops.insert_one(doc)
     return _clean(doc)
@@ -620,6 +649,7 @@ async def parse_brief(body: BriefParseIn, _: dict = Depends(manager_only)):
         workload=workload,
         recent_jobs=recent_jobs,
         prior_emails=prior_emails,
+        system_prompt=await build_active_system_prompt(),
     )
     return result
 
@@ -630,7 +660,18 @@ async def draft_reply_api(body: ReplyDraftIn, _: dict = Depends(manager_only)):
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     client = await db.clients.find_one({"id": email["clientId"]}, {"_id": 0})
-    reply = await ai_service.draft_reply(email["body"], client["name"], client.get("voice", ""))
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    recent_jobs = await db.jobs.find({"client": client["id"]}, {"_id": 0}).sort("createdAt", -1).to_list(5)
+    prior_emails = await db.inbox.find({"clientId": client["id"], "id": {"$ne": body.emailId}}, {"_id": 0}).sort("time", -1).to_list(3)
+    reply = await ai_service.draft_reply(
+        email_body=email["body"],
+        client_name=client["name"],
+        voice=client.get("voice", ""),
+        recent_jobs=recent_jobs,
+        prior_emails=prior_emails,
+        system_prompt=await build_active_system_prompt(),
+    )
     return {"reply": reply}
 
 
@@ -707,7 +748,7 @@ async def report_insights(body: ReportIn, _: dict = Depends(manager_only)):
         "topClient": top_client,
         "utilisation": f"{sum(j['hours'] for j in jobs)} hrs logged",
     }
-    insights = await ai_service.report_insights(body.period, stats)
+    insights = await ai_service.report_insights(body.period, stats, system_prompt=await build_active_system_prompt())
     return {"insights": insights, "stats": stats}
 
 
@@ -715,7 +756,8 @@ async def report_insights(body: ReportIn, _: dict = Depends(manager_only)):
 
 @api.post("/ai/assistant")
 async def ai_assistant(body: AssistantIn, _: dict = Depends(current_user)):
-    reply = await ai_service.assistant(body.prompt, body.sessionId or "assistant")
+    system = await build_active_system_prompt()
+    reply = await ai_service.assistant(body.prompt, body.sessionId or "assistant", system_prompt=system)
     return {"reply": reply}
 
 
@@ -725,8 +767,141 @@ async def ai_job_help(body: JobHelpIn, user: dict = Depends(current_user)):
     job = await db.jobs.find_one(q, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    reply = await ai_service.job_help(body.kind, job)
+    system = await build_active_system_prompt()
+    reply = await ai_service.job_help(body.kind, job, system_prompt=system)
     return {"reply": reply}
+
+
+# ---------- prompt studio + templates ----------
+
+DEFAULT_PROMPT_SETTINGS = {
+    "id": "global",
+    "global_prompt": ai_service.SYSTEM_PROMPT,
+    "ai_rules": [
+        "Match tasks to the right person by skill",
+        "Flag workload over 8 jobs for any one person",
+        "Flag scope creep (requests beyond agreed scope)",
+        "Never propose an impossible deadline without flagging it",
+        "Always use real names, never generic advice",
+    ],
+}
+
+
+async def get_prompt_settings() -> dict:
+    doc = await db.settings.find_one({"id": "global"}, {"_id": 0})
+    if not doc:
+        await db.settings.insert_one({**DEFAULT_PROMPT_SETTINGS})
+        return DEFAULT_PROMPT_SETTINGS
+    return doc
+
+
+async def build_active_system_prompt() -> str:
+    settings = await get_prompt_settings()
+    base = settings.get("global_prompt") or ai_service.SYSTEM_PROMPT
+    rules = settings.get("ai_rules") or []
+    if not rules:
+        return base
+    rules_block = "\n".join(f"- {r}" for r in rules)
+    return f"{base}\n\nADDITIONAL RULES (from Prompt Studio):\n{rules_block}"
+
+
+@api.get("/settings/prompts")
+async def read_prompt_settings(_: dict = Depends(manager_only)):
+    return await get_prompt_settings()
+
+
+@api.patch("/settings/prompts")
+async def update_prompt_settings(data: PromptSettingsIn, _: dict = Depends(manager_only)):
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not updates:
+        return await get_prompt_settings()
+    await db.settings.update_one({"id": "global"}, {"$set": updates}, upsert=True)
+    return await get_prompt_settings()
+
+
+@api.get("/templates")
+async def list_templates(_: dict = Depends(current_user)):
+    return _clean_list(await db.templates.find({}).sort("name", 1).to_list(200))
+
+
+@api.post("/templates")
+async def create_template(data: JobTemplateIn, _: dict = Depends(manager_only)):
+    doc = {"id": f"tpl-{uuid.uuid4().hex[:8]}", **data.model_dump(), "created_at": _now_iso()}
+    await db.templates.insert_one(doc)
+    return _clean(doc)
+
+
+@api.patch("/templates/{template_id}")
+async def patch_template(template_id: str, data: JobTemplateIn, _: dict = Depends(manager_only)):
+    updates = data.model_dump()
+    result = await db.templates.update_one({"id": template_id}, {"$set": updates})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return _clean(await db.templates.find_one({"id": template_id}))
+
+
+@api.delete("/templates/{template_id}")
+async def delete_template(template_id: str, _: dict = Depends(manager_only)):
+    result = await db.templates.delete_one({"id": template_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"ok": True}
+
+
+@api.post("/jobs/from-template")
+async def create_job_from_template(body: UseTemplateIn, _: dict = Depends(manager_only)):
+    tpl = await db.templates.find_one({"id": body.template_id}, {"_id": 0})
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    count = await db.jobs.count_documents({})
+    new_id = f"OS-{count+1:03d}"
+    due = body.due or (datetime.now(timezone.utc) + timedelta(days=tpl.get("default_days", 7))).date().isoformat()
+    title = body.title or tpl["title_template"] or tpl["name"]
+    doc = {
+        "id": new_id,
+        "title": title,
+        "client": body.client or tpl.get("client"),
+        "priority": tpl.get("priority", "medium"),
+        "status": "todo",
+        "due": due,
+        "progress": 0,
+        "team": tpl.get("team", []),
+        "assignees": tpl.get("assignees", []),
+        "recurring": tpl.get("recurring", "none"),
+        "desc": tpl.get("desc", ""),
+        "hours": 0,
+        "revisions": 0,
+        "scopeAdded": 0,
+        "comments": [],
+        "createdAt": _now_iso(),
+        "updatedAt": _now_iso(),
+        "fromTemplate": tpl["id"],
+        "deliverables": tpl.get("deliverables", []),
+    }
+    await db.jobs.insert_one(doc)
+    return _clean(doc)
+
+
+# ---------- approvals enhancements ----------
+
+@api.post("/approvals/{approval_id}/comments")
+async def add_approval_comment(approval_id: str, body: ApprovalCommentIn, user: dict = Depends(current_user)):
+    comment = {"id": f"ac-{uuid.uuid4().hex[:10]}", "author": user["name"], "authorId": user["id"], "text": body.text, "at": _now_iso()}
+    result = await db.approvals.update_one({"id": approval_id}, {"$push": {"comments": comment}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return comment
+
+
+@api.post("/approvals/{approval_id}/reminder")
+async def send_approval_reminder(approval_id: str, _: dict = Depends(manager_only)):
+    result = await db.approvals.update_one(
+        {"id": approval_id},
+        {"$set": {"last_reminder_at": _now_iso()}, "$inc": {"reminder_count": 1}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return _clean(await db.approvals.find_one({"id": approval_id}))
 
 
 # ---------- attachments ----------

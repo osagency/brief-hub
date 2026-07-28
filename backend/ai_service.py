@@ -169,6 +169,7 @@ async def parse_brief(
     workload: dict,
     recent_jobs: list | None = None,
     prior_emails: list | None = None,
+    system_prompt: str | None = None,
 ) -> dict:
     prompt = BRIEF_PROMPT.format(
         email_body=email_body,
@@ -179,10 +180,9 @@ async def parse_brief(
         prior_emails_block=_format_prior_emails(prior_emails or []),
         workload=json.dumps(workload),
     )
-    chat = _new_chat(f"brief-{client_id}")
+    chat = _new_chat(f"brief-{client_id}", system=system_prompt or SYSTEM_PROMPT)
     raw = await chat.send_message(UserMessage(text=prompt))
     data = _extract_json(raw)
-    # Ensure gapQuestionEmail has the client email
     gqe = data.get("gapQuestionEmail") or {}
     if gqe and not gqe.get("to"):
         gqe["to"] = client_email
@@ -193,20 +193,43 @@ async def parse_brief(
 REPLY_PROMPT = """Draft a professional email reply to the following client message.
 Match the client's voice guide. Keep it under 180 words. No markdown, plain text only.
 
+===== CLIENT CONTEXT (use this to sound like it was made for THIS client) =====
 CLIENT: {client_name}
-VOICE: {voice}
+VOICE & TONE GUIDE: {voice}
+DELIVERABLE PATTERNS FROM PAST WORK:
+{recent_jobs_block}
+HOW THIS CLIENT TYPICALLY WRITES:
+{prior_emails_block}
+===== END CLIENT CONTEXT =====
 
 INCOMING EMAIL:
 \"\"\"
 {email_body}
 \"\"\"
 
-Draft the reply body only — no subject line, no signature (Yusuf will add his own)."""
+INSTRUCTIONS:
+- Mirror the client's tone (formal vs casual, first-person vs third, direct vs warm)
+- If the client uses first-person (like Gaurav Sethi), the reply must also be first-person and personal
+- Reference the client's past work naturally if relevant, but do NOT hallucinate specifics
+- Draft the reply body only — no subject line, no signature (Yusuf will add his own)."""
 
 
-async def draft_reply(email_body: str, client_name: str, voice: str) -> str:
-    prompt = REPLY_PROMPT.format(email_body=email_body, client_name=client_name, voice=voice)
-    return await chat_once(f"reply-{client_name}", prompt)
+async def draft_reply(
+    email_body: str,
+    client_name: str,
+    voice: str,
+    recent_jobs: list | None = None,
+    prior_emails: list | None = None,
+    system_prompt: str | None = None,
+) -> str:
+    prompt = REPLY_PROMPT.format(
+        email_body=email_body,
+        client_name=client_name,
+        voice=voice or "(no voice guide on file)",
+        recent_jobs_block=_format_recent_jobs(recent_jobs or []),
+        prior_emails_block=_format_prior_emails(prior_emails or []),
+    )
+    return await chat_once(f"reply-{client_name}", prompt, system=system_prompt)
 
 
 COACHING_PROMPT = """Give sharp, actionable coaching advice for this team member. 3–5 bullets, plain text.
@@ -228,18 +251,18 @@ Needs improvement: {improve}
 Give advice that is specific to this person and their role, referencing the actual numbers."""
 
 
-async def coaching_advice(entry: dict, name: str, role: str) -> str:
+async def coaching_advice(entry: dict, name: str, role: str, system_prompt: str | None = None) -> str:
     prompt = COACHING_PROMPT.format(name=name, role=role, **entry)
-    return await chat_once(f"coach-{entry.get('memberId')}", prompt)
+    return await chat_once(f"coach-{entry.get('memberId')}", prompt, system=system_prompt)
 
 
-async def team_review(entries: list, members: dict) -> str:
+async def team_review(entries: list, members: dict, system_prompt: str | None = None) -> str:
     lines = ["Latest KPI snapshot for the team:"]
     for e in entries:
         m = members.get(e["memberId"], {})
         lines.append(f"- {m.get('name','?')} ({m.get('role_label','?')}): score avg {round((e['quality']+e['csat']+e['deadline']+e['comm']+e['initiative']+e['collab'])/6,1)}, on-time {e['onTime']}%, {e['jobsDone']} jobs done. Good: {e['good']}. Improve: {e['improve']}")
     prompt = "\n".join(lines) + "\n\nGive a sharp AI team review — 5 bullets: who is on fire, who needs attention, one risk, one opportunity, one action for Yusuf this week. Plain text."
-    return await chat_once("team-review", prompt)
+    return await chat_once("team-review", prompt, system=system_prompt)
 
 
 REPORT_PROMPT = """Generate a {period} agency insight for Openspace. Return 5 sharp bullets (plain text, no markdown).
@@ -253,31 +276,31 @@ DATA:
 Focus on: what worked, what didn't, one risk, one client to watch, one recommended action."""
 
 
-async def report_insights(period: str, stats: dict) -> str:
+async def report_insights(period: str, stats: dict, system_prompt: str | None = None) -> str:
     prompt = REPORT_PROMPT.format(period=period, **stats)
-    return await chat_once(f"report-{period}", prompt)
+    return await chat_once(f"report-{period}", prompt, system=system_prompt)
 
 
-async def sop_generate(topic: str) -> dict:
+async def sop_generate(topic: str, system_prompt: str | None = None) -> dict:
     prompt = f"""Generate a Standard Operating Procedure for: "{topic}"
 
 Return ONLY valid JSON. No markdown. Structure:
 {{"title": "string", "role": "writer|designer|mktg|webdev|clientsvc|manager", "time": "e.g. 2 hrs", "steps": ["step 1", "step 2", ...]}}
 
 Aim for 5–8 clear, actionable steps."""
-    raw = await chat_once(f"sop-{topic[:20]}", prompt)
+    raw = await chat_once(f"sop-{topic[:20]}", prompt, system=system_prompt)
     return _extract_json(raw)
 
 
-async def assistant(prompt: str, session_id: str = "assistant") -> str:
-    return await chat_once(session_id, prompt)
+async def assistant(prompt: str, session_id: str = "assistant", system_prompt: str | None = None) -> str:
+    return await chat_once(session_id, prompt, system=system_prompt)
 
 
-async def job_help(kind: str, job: dict) -> str:
+async def job_help(kind: str, job: dict, system_prompt: str | None = None) -> str:
     if kind == "email":
         prompt = f"Draft a short client-facing email update for this job. Plain text. Job: {json.dumps(job, default=str)}"
     elif kind == "next":
         prompt = f"List the next 3 concrete steps for this job. Plain text, numbered. Job: {json.dumps(job, default=str)}"
     else:
         prompt = f"Write a 3-line standup update (Yesterday / Today / Blockers) for this job. Job: {json.dumps(job, default=str)}"
-    return await chat_once(f"job-{job.get('id')}-{kind}", prompt)
+    return await chat_once(f"job-{job.get('id')}-{kind}", prompt, system=system_prompt)
