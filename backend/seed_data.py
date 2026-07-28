@@ -26,12 +26,12 @@ USERS = [
 ]
 
 CLIENTS = [
-    {"id": "galalite", "name": "Galalite Screens", "color": "#4361EE", "short": "GL", "email": "hello@galalite.com", "retainer": 85000, "voice": "cinema tech, premium brand voice"},
-    {"id": "lumina", "name": "Lumina Screens", "color": "#10B981", "short": "LM", "email": "team@lumina.com", "retainer": 45000, "voice": "cinema tech, educational voice"},
-    {"id": "tkpl", "name": "TKPL", "color": "#F59E0B", "short": "TK", "email": "contact@tkpl.in", "retainer": 55000, "voice": "B2B manufacturing, product-forward"},
-    {"id": "intercont", "name": "Intercont+", "color": "#8B5CF6", "short": "IC", "email": "gaurav@intercontplus.com", "retainer": 60000, "voice": "cold chain logistics, Gaurav Sethi's personal voice, always first person"},
-    {"id": "safewater", "name": "Safewater Lines", "color": "#06B6D4", "short": "SW", "email": "ops@safewaterlines.com", "retainer": 40000, "voice": "shipping, formal investor-facing tone"},
-    {"id": "smartco", "name": "SmartCo Shipping", "color": "#EF4444", "short": "SC", "email": "hello@smartcoshipping.com", "retainer": 35000, "voice": "cargo logistics, professional and warm"},
+    {"id": "galalite", "name": "Galalite Screens", "color": "#4361EE", "short": "GL", "email": "hello@galalite.com", "voice": "cinema tech, premium brand voice"},
+    {"id": "lumina", "name": "Lumina Screens", "color": "#10B981", "short": "LM", "email": "team@lumina.com", "voice": "cinema tech, educational voice"},
+    {"id": "tkpl", "name": "TKPL", "color": "#F59E0B", "short": "TK", "email": "contact@tkpl.in", "voice": "B2B manufacturing, product-forward"},
+    {"id": "intercont", "name": "Intercont+", "color": "#8B5CF6", "short": "IC", "email": "gaurav@intercontplus.com", "voice": "cold chain logistics, Gaurav Sethi's personal voice, always first person"},
+    {"id": "safewater", "name": "Safewater Lines", "color": "#06B6D4", "short": "SW", "email": "ops@safewaterlines.com", "voice": "shipping, formal investor-facing tone"},
+    {"id": "smartco", "name": "SmartCo Shipping", "color": "#EF4444", "short": "SC", "email": "hello@smartcoshipping.com", "voice": "cargo logistics, professional and warm"},
 ]
 
 JOBS = [
@@ -63,6 +63,21 @@ SOPS = [
     {"id": "sop-3", "title": "Monthly SEO Report", "role": "mktg", "time": "1.5 hrs", "steps": ["Pull GSC + GA4 data for the period", "Populate report template", "Write 3-bullet insights section", "Recommend 2 next-month actions", "Send to Yusuf for review before client"]},
     {"id": "sop-4", "title": "WordPress Speed Fix", "role": "webdev", "time": "2–5 hrs", "steps": ["Run PageSpeed + WebPageTest, note top 3 issues", "Take a staging backup", "Fix images (WebP + lazy load)", "Enable page caching + minify", "Re-test, share before/after in the job"]},
     {"id": "sop-5", "title": "Client Approval Round", "role": "clientsvc", "time": "30 min", "steps": ["Package deliverable + brief recap in one message", "Set clear approval deadline (usually 48h)", "Log the send in the Approvals page", "If revision requested, translate feedback into actionable notes for the team", "Update job status accordingly"]},
+    {"id": "sop-6", "title": "LinkedIn Ad Campaign Setup", "role": "mktg", "time": "3 hrs", "steps": ["Confirm objective + KPI with Yusuf", "Build audience (job title + industry + geo)", "Create 3 ad creative variants (with Priya)", "Set daily budget + schedule", "Enable UTM tracking, launch, monitor first 48h daily"]},
+    {"id": "sop-7", "title": "Google Ads Search Campaign Setup", "role": "mktg", "time": "3–4 hrs", "steps": ["Keyword research (Ahrefs + Google KP)", "Group keywords into ad groups (max 20 per group)", "Write 3 responsive search ads per ad group", "Set negative keyword list", "Add conversion tracking, launch, review week 1"]},
+    {"id": "sop-8", "title": "Instagram Reel Production", "role": "designer", "time": "4 hrs", "steps": ["Storyboard 15–30s hook + payoff", "Shoot / source footage", "Edit in CapCut or Premiere", "Add captions + trending audio", "Export vertical 1080x1920, hand to Kavya for scheduling"]},
+    {"id": "sop-9", "title": "Email Newsletter Send", "role": "mktg", "time": "1 hr", "steps": ["Build in email tool (Mailchimp/ConvertKit)", "Verify all merge tags with a test send to team", "Preview on desktop + mobile", "Schedule 10:30 IST Tue/Thu (best open rates)", "Post-send: log opens/CTR in Notion after 48h"]},
+    {"id": "sop-10", "title": "New Client Onboarding", "role": "clientsvc", "time": "1 week", "steps": ["Send welcome email + kickoff form within 24h of signing", "Book kickoff call within 5 days", "Collect brand assets, tone-of-voice doc, competitor list", "Set up shared Drive folder + Slack channel", "Publish 30-60-90 day plan and share with client + team"]},
+    {"id": "sop-11", "title": "Client Offboarding", "role": "clientsvc", "time": "2 hrs", "steps": ["Send goodbye email with final report + assets ZIP", "Transfer platform admin access (Meta, Google, WordPress)", "Archive Slack channel + Drive folder", "Final internal retro — what worked, what didn't", "Log lessons in the retros doc"]},
+    {"id": "sop-12", "title": "Weekly Team Standup", "role": "manager", "time": "20 min", "steps": ["Each person: yesterday / today / blockers (2 min each)", "Yusuf reviews overdue jobs (data-testid on the board)", "Assign owner for every blocker", "Log outcomes in the standup doc", "End on time — no scope discussions here"]},
+    {"id": "sop-13", "title": "Monthly Client Reporting Cadence", "role": "clientsvc", "time": "3 hrs", "steps": ["1st: pull all data + notes", "2nd: draft insights + next-month plan", "3rd: internal review with Yusuf", "4th: send to client + book 20-min review call", "5th: log client feedback + update next-month plan"]},
+    {"id": "sop-14", "title": "Content Calendar Planning (Monthly)", "role": "mktg", "time": "2 hrs", "steps": ["Review last month's top-performing posts", "Align themes with client campaigns", "Draft 4-week grid per platform", "Get client approval by 25th of prior month", "Move to production once approved"]},
+    {"id": "sop-15", "title": "Landing Page Build", "role": "webdev", "time": "6–10 hrs", "steps": ["Wireframe (Figma) with Priya", "Set up WordPress/Framer template", "Implement responsive design (mobile-first)", "Add form + analytics + heatmap script", "QA on mobile/desktop, launch, monitor conversions week 1"]},
+    {"id": "sop-16", "title": "Case Study Production", "role": "writer", "time": "4 hrs", "steps": ["Interview client contact (30 min)", "Collect data + screenshots", "Write challenge / approach / results structure", "Design in template (with Priya)", "Publish on site + share as social series (with Kavya)"]},
+    {"id": "sop-17", "title": "Press Release Writing", "role": "writer", "time": "2 hrs", "steps": ["Confirm angle + spokesperson quote", "Write in inverted-pyramid AP style", "Add boilerplate + contact info at bottom", "Get client sign-off", "Distribute via PR wire + direct email to relevant journalists"]},
+    {"id": "sop-18", "title": "Analytics Setup for New Client", "role": "webdev", "time": "2 hrs", "steps": ["Install GA4 + GTM on the client site", "Configure conversion events (form / call / purchase)", "Set up Search Console + Bing Webmaster", "Grant Kavya read access", "Verify data flowing after 48h"]},
+    {"id": "sop-19", "title": "Scope Creep Response", "role": "clientsvc", "time": "15 min", "steps": ["Log the addition in the Job (increment scopeAdded)", "Reply with a warm 'happy to help' + a scoping question", "Estimate hours needed and share with Yusuf before committing", "If accepted, update the job brief and set new deadline", "Track in monthly retro"]},
+    {"id": "sop-20", "title": "Emergency Client Escalation", "role": "manager", "time": "immediate", "steps": ["Acknowledge within 30 min (Yusuf or Meera)", "Assemble owner + reviewer within 2 hrs", "Send holding email + realistic next-update time", "Fix the issue, then send a post-mortem email within 24h", "Log in escalations doc + share learnings in next standup"]},
 ]
 
 CONTENT_POSTS = [

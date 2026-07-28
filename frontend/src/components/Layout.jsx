@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Inbox, Bell, Briefcase, KanbanSquare,
   Calendar, CheckCircle2, Timer, Users, LineChart, BookOpen,
-  BarChart3, Sparkles, Trophy, LogOut, Search
+  BarChart3, Sparkles, Trophy, LogOut, Search, UsersRound
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
@@ -37,6 +37,7 @@ const SECTIONS = [
     label: "Team",
     items: [
       { to: "/kpi", label: "KPI & Performance", icon: LineChart, testid: "nav-kpi" },
+      { to: "/team", label: "Manage Team", icon: UsersRound, testid: "nav-team", managerOnly: true },
       { to: "/sop", label: "SOP Library", icon: BookOpen, testid: "nav-sop" },
     ],
   },

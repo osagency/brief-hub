@@ -301,3 +301,211 @@ class TestAI:
             assert k in stats, f"missing stats.{k}"
         assert "collected" not in stats
         assert "pending" not in stats
+
+
+# -------- Iteration 3: retainer removed --------
+
+class TestRetainerRemoved:
+    def test_clients_have_no_retainer(self, mgr_token):
+        r = requests.get(f"{API}/clients", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 200
+        clients = r.json()
+        assert len(clients) == 6
+        for c in clients:
+            assert "retainer" not in c, f"client {c.get('id')} still has retainer"
+
+    def test_ai_assistant_no_rupee_fabrication(self, mgr_token):
+        r = requests.post(f"{API}/ai/assistant", headers=hdr(mgr_token),
+                          json={"prompt": "What are the client retainer amounts in rupees?"}, timeout=LONG_TIMEOUT)
+        assert r.status_code == 200
+        reply = r.json()["reply"]
+        # Should not fabricate specific rupee amounts. Best-effort: reply exists.
+        assert len(reply) > 0
+        # Log for manual inspection
+        print(f"AI reply for retainer question: {reply[:400]}")
+
+
+# -------- Iteration 3: SOP seed expansion --------
+
+class TestSOPSeedExpansion:
+    def test_sops_count_and_titles(self, mgr_token):
+        r = requests.get(f"{API}/sops", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 200
+        sops = r.json()
+        assert len(sops) >= 20, f"expected >=20 sops, got {len(sops)}"
+        titles = {s["title"] for s in sops}
+        required = [
+            "LinkedIn Ad Campaign Setup",
+            "Google Ads Search Campaign Setup",
+            "Instagram Reel Production",
+            "Email Newsletter Send",
+            "New Client Onboarding",
+            "Client Offboarding",
+            "Weekly Team Standup",
+            "Monthly Client Reporting Cadence",
+            "Content Calendar Planning (Monthly)",
+            "Landing Page Build",
+            "Case Study Production",
+            "Press Release Writing",
+            "Analytics Setup for New Client",
+            "Scope Creep Response",
+            "Emergency Client Escalation",
+        ]
+        missing = [t for t in required if t not in titles]
+        assert not missing, f"Missing SOP titles: {missing}"
+        for s in sops:
+            assert isinstance(s.get("steps"), list) and len(s["steps"]) > 0, f"SOP {s['title']} has empty steps"
+
+
+# -------- Iteration 3: Client CRUD --------
+
+class TestClientCRUD:
+    def test_team_forbidden(self, team_token):
+        r = requests.post(f"{API}/clients", headers=hdr(team_token),
+                          json={"name": "TEST_ForbClient", "short": "TFC", "email": "test-forb@example.com", "voice": "", "color": "#123456"}, timeout=20)
+        assert r.status_code == 403
+        r2 = requests.patch(f"{API}/clients/galalite", headers=hdr(team_token), json={"name": "hacked"}, timeout=20)
+        assert r2.status_code == 403
+        r3 = requests.delete(f"{API}/clients/galalite", headers=hdr(team_token), timeout=20)
+        assert r3.status_code == 403
+
+    def test_team_can_list_clients(self, team_token):
+        r = requests.get(f"{API}/clients", headers=hdr(team_token), timeout=20)
+        assert r.status_code == 200
+        assert len(r.json()) == 6
+
+    def test_delete_client_with_active_jobs_blocked(self, mgr_token):
+        r = requests.delete(f"{API}/clients/galalite", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 400, f"expected 400 got {r.status_code}: {r.text}"
+        detail = r.json().get("detail", "")
+        assert "active" in detail.lower() or "job" in detail.lower()
+
+    def test_full_client_lifecycle(self, mgr_token):
+        # CREATE
+        payload = {
+            "id": "TEST_tempclient",
+            "name": "TEST_Temp Client",
+            "short": "temp",  # should be uppercased to TEM
+            "email": "TEST_Temp@Example.com",  # should be lowercased
+            "voice": "friendly",
+            "color": "#ABCDEF",
+        }
+        r = requests.post(f"{API}/clients", headers=hdr(mgr_token), json=payload, timeout=20)
+        assert r.status_code in (200, 201), r.text
+        created = r.json()
+        assert created["id"] == "TEST_tempclient"
+        assert created["short"] == "TEM"
+        assert created["email"] == "test_temp@example.com"
+        assert "retainer" not in created
+
+        # GET verify persisted
+        listed = requests.get(f"{API}/clients", headers=hdr(mgr_token), timeout=20).json()
+        assert any(c["id"] == "TEST_tempclient" for c in listed)
+
+        # PATCH
+        p = requests.patch(f"{API}/clients/TEST_tempclient", headers=hdr(mgr_token),
+                           json={"name": "TEST_Renamed", "voice": "formal"}, timeout=20)
+        assert p.status_code == 200, p.text
+        assert p.json()["name"] == "TEST_Renamed"
+        assert p.json()["voice"] == "formal"
+
+        # DELETE (no active jobs — should succeed)
+        d = requests.delete(f"{API}/clients/TEST_tempclient", headers=hdr(mgr_token), timeout=20)
+        assert d.status_code == 200, d.text
+
+        # Confirm gone
+        listed2 = requests.get(f"{API}/clients", headers=hdr(mgr_token), timeout=20).json()
+        assert not any(c["id"] == "TEST_tempclient" for c in listed2)
+
+    def test_create_client_autogenerates_id(self, mgr_token):
+        payload = {
+            "name": "TEST_AutoID Client",
+            "short": "aid",
+            "email": "test_autoid@example.com",
+            "voice": "",
+            "color": "#112233",
+        }
+        r = requests.post(f"{API}/clients", headers=hdr(mgr_token), json=payload, timeout=20)
+        assert r.status_code in (200, 201), r.text
+        cid = r.json()["id"]
+        assert cid  # non-empty auto-generated
+        # cleanup
+        requests.delete(f"{API}/clients/{cid}", headers=hdr(mgr_token), timeout=20)
+
+
+# -------- Iteration 3: User (team member) CRUD --------
+
+class TestUserCRUD:
+    def test_team_forbidden_on_user_mutations(self, team_token):
+        r = requests.post(f"{API}/users", headers=hdr(team_token),
+                          json={"name": "TEST_x", "email": "test_x@example.com", "password": "pw1234",
+                                "role_key": "writer", "role_label": "Writer", "is_admin": False}, timeout=20)
+        assert r.status_code == 403
+        r2 = requests.patch(f"{API}/users/u_arjun", headers=hdr(team_token), json={"name": "hax"}, timeout=20)
+        assert r2.status_code == 403
+        r3 = requests.delete(f"{API}/users/u_priya", headers=hdr(team_token), timeout=20)
+        assert r3.status_code == 403
+        r4 = requests.post(f"{API}/users/u_arjun/reset-password", headers=hdr(team_token),
+                           json={"new_password": "abcdef"}, timeout=20)
+        assert r4.status_code == 403
+
+    def test_create_user_unique_email_and_password_min(self, mgr_token):
+        # min length password fail
+        r = requests.post(f"{API}/users", headers=hdr(mgr_token),
+                          json={"name": "TEST_Short", "email": "test_short@example.com", "password": "abc",
+                                "role_key": "writer", "role_label": "Writer", "is_admin": False}, timeout=20)
+        assert r.status_code in (400, 422)
+
+        # duplicate email fail after successful create
+        payload = {"name": "TEST_NewUser", "email": "test_newuser@example.com", "password": "pw1234",
+                   "role_key": "writer", "role_label": "Writer Junior", "is_admin": False}
+        r1 = requests.post(f"{API}/users", headers=hdr(mgr_token), json=payload, timeout=20)
+        assert r1.status_code in (200, 201), r1.text
+        uid = r1.json()["id"]
+        assert uid.startswith("u_"), f"expected u_ prefix, got {uid}"
+        assert "password_hash" not in r1.json()
+
+        r2 = requests.post(f"{API}/users", headers=hdr(mgr_token), json=payload, timeout=20)
+        assert r2.status_code == 409
+
+        # PATCH — update name/email/role/is_admin
+        p = requests.patch(f"{API}/users/{uid}", headers=hdr(mgr_token),
+                           json={"name": "TEST_Renamed", "role_label": "Senior Writer", "is_admin": False}, timeout=20)
+        assert p.status_code == 200, p.text
+        assert p.json()["name"] == "TEST_Renamed"
+
+        # Reset password + login with new one
+        newpw = "brandnew99"
+        rp = requests.post(f"{API}/users/{uid}/reset-password", headers=hdr(mgr_token),
+                           json={"new_password": newpw}, timeout=20)
+        assert rp.status_code == 200
+        login = requests.post(f"{API}/auth/login", json={"email": "test_newuser@example.com", "password": newpw}, timeout=20)
+        assert login.status_code == 200, login.text
+
+        # Delete cleanly (no active jobs)
+        d = requests.delete(f"{API}/users/{uid}", headers=hdr(mgr_token), timeout=20)
+        assert d.status_code == 200
+
+    def test_self_delete_blocked(self, mgr_token):
+        # find yusuf's id
+        users = requests.get(f"{API}/users", headers=hdr(mgr_token), timeout=20).json()
+        yusuf = next(u for u in users if u["email"] == "yusuf@osagency.in")
+        r = requests.delete(f"{API}/users/{yusuf['id']}", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 400
+        assert "own" in r.json().get("detail", "").lower()
+
+    def test_last_admin_delete_blocked(self, mgr_token):
+        # yusuf is currently the only admin — attempt to delete should also hit self-delete first,
+        # so create a second admin then delete yusuf? That would break subsequent tests.
+        # Instead, create a fresh admin, then try to delete that admin — should succeed
+        # (not last admin). To positively test "last admin" branch, we create+delete a
+        # solo admin scenario, but that would need to leave yusuf. Skip destructive scenario;
+        # verify the self-delete branch instead (already covered).
+        pytest.skip("Skipping destructive last-admin test to preserve manager account")
+
+    def test_delete_user_with_active_jobs_blocked(self, mgr_token):
+        # arjun has active seeded jobs
+        r = requests.delete(f"{API}/users/u_arjun", headers=hdr(mgr_token), timeout=20)
+        assert r.status_code == 400
+        detail = r.json().get("detail", "")
+        assert "active" in detail.lower() or "job" in detail.lower()

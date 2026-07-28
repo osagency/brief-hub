@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
-import { AVATAR, ROLE_LABEL } from "../lib/constants";
+import { avatarFor } from "../lib/constants";
 import { Sparkles, TrendingUp, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
 
 const PERIODS = ["weekly", "monthly", "quarterly"];
@@ -126,7 +126,7 @@ export default function KPI() {
               return (
                 <tr key={u.id} className="border-t border-[#E5E8F0]">
                   <td className="px-4 py-2 mono">#{idx+1}</td>
-                  <td className="px-4 py-2"><div className="flex items-center gap-2"><img src={AVATAR[u.id]} className="w-6 h-6 rounded-full" alt={u.name} /><span>{u.name}</span></div></td>
+                  <td className="px-4 py-2"><div className="flex items-center gap-2"><img src={avatarFor(u)} className="w-6 h-6 rounded-full" alt={u.name} /><span>{u.name}</span></div></td>
                   <td className="px-4 py-2 mono">{e.jobsDone}</td>
                   <td className="px-4 py-2 mono">{e.onTime}%</td>
                   <td className="px-4 py-2 mono">{e.quality.toFixed(1)}</td>
@@ -145,7 +145,7 @@ export default function KPI() {
         {ranked.map(({e, u}) => (
           <div key={u.id} className="card-surface p-5" data-testid={`kpi-card-${u.id}`}>
             <div className="flex items-center gap-3">
-              <img src={AVATAR[u.id]} className="w-10 h-10 rounded-full" alt={u.name} />
+              <img src={avatarFor(u)} className="w-10 h-10 rounded-full" alt={u.name} />
               <div>
                 <div className="text-[14px] font-semibold text-slate-900">{u.name}</div>
                 <div className="text-[11px] mono text-slate-500">{u.role_label}</div>

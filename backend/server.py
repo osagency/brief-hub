@@ -202,6 +202,44 @@ class SOPGenIn(BaseModel):
     topic: str
 
 
+class ClientIn(BaseModel):
+    id: Optional[str] = None
+    name: str
+    color: str = "#4361EE"
+    short: str
+    email: EmailStr
+    voice: str = ""
+
+
+class ClientPatch(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    short: Optional[str] = None
+    email: Optional[EmailStr] = None
+    voice: Optional[str] = None
+
+
+class UserCreate(BaseModel):
+    name: str
+    email: EmailStr
+    password: str = Field(min_length=6)
+    role_key: str  # writer | designer | mktg | webdev | clientsvc | manager
+    role_label: str
+    is_admin: bool = False
+
+
+class UserPatch(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    role_key: Optional[str] = None
+    role_label: Optional[str] = None
+    is_admin: Optional[bool] = None
+
+
+class PasswordReset(BaseModel):
+    new_password: str = Field(min_length=6)
+
+
 # ---------- auth ----------
 
 @api.post("/auth/login")
@@ -227,9 +265,115 @@ async def list_users(_: dict = Depends(current_user)):
     return users
 
 
+@api.post("/users")
+async def create_user(data: UserCreate, _: dict = Depends(manager_only)):
+    email = data.email.lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=409, detail="Email already in use")
+    doc = {
+        "id": f"u_{uuid.uuid4().hex[:8]}",
+        "email": email,
+        "name": data.name,
+        "role_key": data.role_key,
+        "role_label": data.role_label,
+        "is_admin": data.is_admin,
+        "password_hash": bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode(),
+        "created_at": _now_iso(),
+    }
+    await db.users.insert_one(doc)
+    doc.pop("password_hash", None)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/users/{user_id}")
+async def patch_user(user_id: str, data: UserPatch, actor: dict = Depends(manager_only)):
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "email" in updates:
+        updates["email"] = updates["email"].lower()
+        existing = await db.users.find_one({"email": updates["email"], "id": {"$ne": user_id}})
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already in use")
+    if not updates:
+        return {"ok": True}
+    result = await db.users.update_one({"id": user_id}, {"$set": updates})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    doc = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    return doc
+
+
+@api.post("/users/{user_id}/reset-password")
+async def reset_password(user_id: str, data: PasswordReset, _: dict = Depends(manager_only)):
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"password_hash": bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True}
+
+
+@api.delete("/users/{user_id}")
+async def delete_user(user_id: str, actor: dict = Depends(manager_only)):
+    if user_id == actor["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("is_admin"):
+        admin_count = await db.users.count_documents({"is_admin": True})
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last admin")
+    active = await db.jobs.count_documents({"assignees": user_id, "status": {"$in": ["active", "todo", "review", "overdue"]}})
+    if active > 0:
+        raise HTTPException(status_code=400, detail=f"Reassign this person's {active} active job(s) first")
+    await db.users.delete_one({"id": user_id})
+    # cascade: pull from any remaining job assignees
+    await db.jobs.update_many({}, {"$pull": {"assignees": user_id}})
+    return {"ok": True}
+
+
 @api.get("/clients")
 async def list_clients(_: dict = Depends(current_user)):
     return _clean_list(await db.clients.find({}).to_list(100))
+
+
+@api.post("/clients")
+async def create_client(data: ClientIn, _: dict = Depends(manager_only)):
+    cid = data.id or data.short.lower().replace(" ", "-") or f"c-{uuid.uuid4().hex[:8]}"
+    if await db.clients.find_one({"id": cid}):
+        raise HTTPException(status_code=409, detail="Client id already exists")
+    doc = {"id": cid, "name": data.name, "color": data.color, "short": data.short.upper()[:3], "email": data.email.lower(), "voice": data.voice}
+    await db.clients.insert_one(doc)
+    return _clean(doc)
+
+
+@api.patch("/clients/{client_id}")
+async def patch_client(client_id: str, data: ClientPatch, _: dict = Depends(manager_only)):
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "email" in updates:
+        updates["email"] = updates["email"].lower()
+    if "short" in updates:
+        updates["short"] = updates["short"].upper()[:3]
+    if not updates:
+        return {"ok": True}
+    result = await db.clients.update_one({"id": client_id}, {"$set": updates})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+    doc = await db.clients.find_one({"id": client_id})
+    return _clean(doc)
+
+
+@api.delete("/clients/{client_id}")
+async def delete_client(client_id: str, _: dict = Depends(manager_only)):
+    if not await db.clients.find_one({"id": client_id}):
+        raise HTTPException(status_code=404, detail="Client not found")
+    active = await db.jobs.count_documents({"client": client_id, "status": {"$in": ["active", "todo", "review", "overdue"]}})
+    if active > 0:
+        raise HTTPException(status_code=400, detail=f"{active} active job(s) still linked to this client. Archive or reassign them first.")
+    await db.clients.delete_one({"id": client_id})
+    return {"ok": True}
 
 
 # ---------- jobs ----------

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
-import { fmtDate, fmtINR, STATUS_LABEL, ROLE_EMOJI, ROLE_COLOR } from "../lib/constants";
-import { Briefcase, AlertTriangle, Clock, Wallet, TrendingUp } from "lucide-react";
+import { fmtDate, STATUS_LABEL, ROLE_EMOJI, ROLE_COLOR } from "../lib/constants";
+import { Briefcase, AlertTriangle, Clock, TrendingUp } from "lucide-react";
 import JobDetailModal from "../components/JobDetailModal";
 
 const StatCard = ({ label, value, tone, icon: Icon, testid }) => {
@@ -46,7 +46,13 @@ export default function Dashboard() {
   const active = jobs.filter(j => ["active","todo","review"].includes(j.status)).length;
   const overdue = jobs.filter(j => j.status === "overdue").length;
   const awaiting = approvals.filter(a => a.status === "pending").length;
-  const monthlyRevenue = clients.reduce((s, c) => s + (c.retainer || 0), 0);
+
+  const now = new Date();
+  const doneThisMonth = jobs.filter(j => {
+    if (j.status !== "done") return false;
+    const d = new Date(j.updatedAt || j.createdAt || j.due);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).length;
 
   const brandHealth = clients.map(c => {
     const forC = jobs.filter(j => j.client === c.id);
@@ -77,8 +83,7 @@ export default function Dashboard() {
         <StatCard label="Active jobs" value={active} icon={Briefcase} testid="stat-active-jobs" />
         <StatCard label="Overdue" value={overdue} tone="red" icon={AlertTriangle} testid="stat-overdue" />
         <StatCard label="Awaiting approval" value={awaiting} tone="orange" icon={Clock} testid="stat-awaiting" />
-        {isManager && <StatCard label="Monthly revenue" value={fmtINR(monthlyRevenue)} tone="green" icon={Wallet} testid="stat-revenue" />}
-        {!isManager && <StatCard label="Team members" value={users.length} icon={TrendingUp} testid="stat-team" />}
+        <StatCard label="Done this month" value={doneThisMonth} tone="green" icon={TrendingUp} testid="stat-done-month" />
       </div>
 
       {/* Multi-Brand Health */}
@@ -147,19 +152,19 @@ export default function Dashboard() {
           </div>
 
           {isManager && (
-            <div className="card-surface p-5" data-testid="monthly-retainers">
-              <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-3">Monthly retainers</div>
-              <div className="space-y-2 text-sm">
-                {clients.map(c => (
-                  <div key={c.id} className="flex justify-between">
-                    <span className="text-slate-700 text-[13px]" style={{ color: c.color }}>{c.name}</span>
-                    <span className="mono text-slate-900 font-medium">{fmtINR(c.retainer)}</span>
-                  </div>
-                ))}
-                <div className="border-t border-[#E5E8F0] pt-2 mt-2 flex justify-between">
-                  <span className="text-slate-900 font-semibold text-[13px]">Total</span>
-                  <span className="mono text-emerald-600 font-semibold">{fmtINR(monthlyRevenue)}</span>
-                </div>
+            <div className="card-surface p-5" data-testid="client-mix">
+              <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-3">Jobs per client</div>
+              <div className="space-y-2">
+                {clients.map(c => {
+                  const total = jobs.filter(j => j.client === c.id).length;
+                  const active = jobs.filter(j => j.client === c.id && ["active","todo","review","overdue"].includes(j.status)).length;
+                  return (
+                    <div key={c.id} className="flex items-center justify-between text-[12px]">
+                      <span className="font-medium" style={{ color: c.color }}>{c.name}</span>
+                      <span className="mono text-slate-600"><span className="font-semibold text-slate-900">{active}</span> active · {total} total</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

@@ -1,10 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
-import { fmtDate, fmtINR, AVATAR } from "../lib/constants";
+import { fmtDate, avatarFor } from "../lib/constants";
 import { Play, Pause, RotateCcw, Timer as TimerIcon } from "lucide-react";
-
-const RATE_PER_HR = 800;
 
 function useTimer() {
   const [elapsed, setElapsed] = useState(0);
@@ -57,16 +55,15 @@ export default function TimeTracker() {
     load();
   };
 
-  // profitability per client
-  const profitByClient = clients.map(c => {
-    const cJobs = jobs.filter(j => j.client === c.id);
-    const hours = cJobs.reduce((s, j) => s + (j.hours || 0), 0);
-    const cost = hours * RATE_PER_HR;
-    const revenue = c.retainer;
-    const profit = revenue - cost;
-    const pct = revenue ? Math.round((profit / revenue) * 100) : 0;
-    return { c, hours, cost, revenue, profit, pct };
+  // hours per client this month
+  const now = new Date();
+  const monthLogs = logs.filter(l => { const d = new Date(l.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+  const hoursByClient = clients.map(c => {
+    const cJobIds = new Set(jobs.filter(j => j.client === c.id).map(j => j.id));
+    const hours = monthLogs.filter(l => cJobIds.has(l.jobId)).reduce((s,l) => s + l.hours, 0);
+    return { c, hours };
   });
+  const maxClientHours = Math.max(1, ...hoursByClient.map(x => x.hours));
 
   const teamHours = users.map(u => {
     const total = logs.filter(l => l.person === u.id).reduce((s,l) => s + l.hours, 0);
@@ -130,21 +127,20 @@ export default function TimeTracker() {
         </div>
 
         <div className="space-y-6">
-          <div className="card-surface p-5" data-testid="profitability">
-            <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-3">Profitability per client</div>
+          <div className="card-surface p-5" data-testid="hours-per-client">
+            <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-3">Hours per client · this month</div>
             <div className="space-y-3">
-              {profitByClient.map(({c,hours,cost,revenue,pct}) => {
-                const color = pct > 50 ? "#10B981" : pct >= 20 ? "#F59E0B" : "#EF4444";
-                return (
-                  <div key={c.id}>
-                    <div className="flex items-center justify-between text-[12px]">
-                      <span className="text-slate-800 font-medium">{c.name}</span>
-                      <span className="mono font-medium" style={{ color }}>{pct}%</span>
-                    </div>
-                    <div className="text-[10px] mono text-slate-400">{fmtINR(revenue)} · cost {fmtINR(cost)} ({hours}h)</div>
+              {hoursByClient.map(({c, hours}) => (
+                <div key={c.id}>
+                  <div className="flex items-center justify-between text-[12px]">
+                    <span className="text-slate-800 font-medium" style={{ color: c.color }}>{c.name}</span>
+                    <span className="mono text-slate-900 font-medium">{hours}h</span>
                   </div>
-                );
-              })}
+                  <div className="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${(hours/maxClientHours)*100}%`, background: c.color }} />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -153,7 +149,7 @@ export default function TimeTracker() {
             <div className="space-y-2">
               {teamHours.map(({u, total}) => (
                 <div key={u.id} className="flex items-center gap-2">
-                  <img src={AVATAR[u.id]} alt={u.name} className="w-6 h-6 rounded-full" />
+                  <img src={avatarFor(u)} alt={u.name} className="w-6 h-6 rounded-full" />
                   <div className="flex-1">
                     <div className="text-[12px] text-slate-800">{u.name}</div>
                     <div className="h-1.5 bg-slate-100 rounded-full mt-1"><div className="h-full bg-[#4361EE] rounded-full" style={{ width: `${(total/maxHours)*100}%` }} /></div>

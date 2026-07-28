@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
-import { AVATAR, QUOTES, ROLE_EMOJI, ROLE_LABEL, XP_LEVEL } from "../lib/constants";
+import { QUOTES, XP_LEVEL, avatarFor } from "../lib/constants";
 import { Crown, RotateCw, Trophy, Flame } from "lucide-react";
 
 const BADGES = {
@@ -69,7 +69,7 @@ export default function Vibes() {
             return (
               <div key={x.u.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 transition">
                 <div className="w-6 text-center mono text-slate-500">{medal}</div>
-                <img src={AVATAR[x.u.id]} className="w-8 h-8 rounded-full" alt={x.u.name} />
+                <img src={avatarFor(x.u)} className="w-8 h-8 rounded-full" alt={x.u.name} />
                 <div className="flex-1">
                   <div className="text-[13px] font-medium text-slate-900">{x.u.name}</div>
                   <div className="text-[11px] mono text-slate-500">{x.u.role_label}</div>
@@ -91,7 +91,7 @@ export default function Vibes() {
             <div key={x.u.id} className="card-surface p-5 relative" data-testid={`vibes-card-${x.u.id}`}>
               {i === 0 && <Crown className="absolute top-3 right-3 text-amber-500" size={18} />}
               <div className="flex items-center gap-3">
-                <img src={AVATAR[x.u.id]} className="w-12 h-12 rounded-full" alt={x.u.name} />
+                <img src={avatarFor(x.u)} className="w-12 h-12 rounded-full" alt={x.u.name} />
                 <div>
                   <div className="text-[14px] font-semibold text-slate-900">{x.u.name}</div>
                   <div className="text-[11px] mono text-slate-500">{x.u.role_label}</div>

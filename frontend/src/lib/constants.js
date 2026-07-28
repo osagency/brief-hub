@@ -44,6 +44,13 @@ export const AVATAR = {
   u_meera: "https://ui-avatars.com/api/?name=Meera&background=EF4444&color=fff&size=150",
 };
 
+export const avatarFor = (user) => {
+  if (!user) return "https://ui-avatars.com/api/?name=U&background=4361EE&color=fff&size=150";
+  if (AVATAR[user.id]) return AVATAR[user.id];
+  const bg = (ROLE_COLOR[user.role_key] || "#4361EE").replace("#", "");
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || "U")}&background=${bg}&color=fff&size=150`;
+};
+
 export const fmtINR = (n) => "₹" + (n || 0).toLocaleString("en-IN");
 export const fmtDate = (iso) => {
   if (!iso) return "—";
