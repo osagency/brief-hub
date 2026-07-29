@@ -320,3 +320,38 @@ async def job_celebrate(person: str, role: str, client: str, title: str, system_
     prompt = CELEBRATE_PROMPT.format(person=person, role=role, client=client, title=title)
     line = await chat_once(f"celebrate-{person}-{title[:20]}", prompt, system=system_prompt)
     return line.strip().strip('"').strip("'")
+
+
+DIGEST_PROMPT = """You are writing Yusuf's Monday morning "State of the Agency" digest for Openspace.
+
+Return EXACTLY 5 bullets, no headings, no markdown, no numbering, one bullet per line, each starting with an emoji:
+🔥 who or what is on fire (celebrate a specific person or client win with numbers)
+⚠️ who needs attention (specific person or job — reference numbers)
+🚨 client at risk (name the client + why — overdue jobs, silent client, scope creep)
+✨ opportunity (what to capitalise on this week)
+🎯 Yusuf's Monday action (one concrete thing to do today)
+
+Keep each bullet to a single sharp line (max 22 words). Reference real names and numbers from the data below. Never hallucinate — if the data is thin, say so.
+
+WEEK STATS (last 7 days):
+- Jobs completed: {done_week}
+- Jobs still active: {active_total}
+- Jobs overdue: {overdue}
+- Approvals pending: {pending_approvals}
+- Top client by open workload: {top_client}
+- Most-loaded team member: {top_loaded}
+- Least-loaded team member: {least_loaded}
+- Recent scope-creep flags: {scope_flags}
+- Silent clients (no activity 7+ days): {silent_clients}
+- @mentions to Yusuf this week: {mentions_yusuf}
+
+TEAM WORKLOAD:
+{workload_block}
+
+CLIENTS AT A GLANCE:
+{clients_block}"""
+
+
+async def manager_digest(stats: dict, system_prompt: str | None = None) -> str:
+    prompt = DIGEST_PROMPT.format(**stats)
+    return await chat_once("manager-digest", prompt, system=system_prompt)

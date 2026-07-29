@@ -981,6 +981,121 @@ async def kpi_streak(user: dict = Depends(current_user)):
     return {"streak": streak, "jobs_today": jobs_today, "total_done": total_done}
 
 
+def _iso_week_key() -> str:
+    now = datetime.now(timezone.utc)
+    y, w, _ = now.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+async def _build_digest_stats() -> dict:
+    """Aggregate the last-7-day agency stats used by both the AI digest and the UI header."""
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+    week_ago_iso = week_ago.isoformat()
+
+    jobs = _clean_list(await db.jobs.find({}).to_list(1000))
+    users = _clean_list(await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(200))
+    clients = _clean_list(await db.clients.find({}).to_list(100))
+    approvals = _clean_list(await db.approvals.find({}).to_list(500))
+    notifs = await db.notifications.count_documents({
+        "user_id": "u_yusuf",
+        "type": "mention",
+        "time": {"$gte": week_ago_iso},
+    })
+
+    # Bucket
+    open_statuses = {"active", "todo", "review", "overdue"}
+    active_total = sum(1 for j in jobs if j["status"] in open_statuses)
+    overdue = sum(1 for j in jobs if j["status"] == "overdue")
+    done_week = sum(1 for j in jobs if j["status"] == "done" and (j.get("updatedAt") or "") >= week_ago_iso)
+    pending_approvals = sum(1 for a in approvals if a.get("status") == "pending")
+    scope_flags = sum(1 for j in jobs if (j.get("scopeAdded") or 0) > 0 and j["status"] in open_statuses)
+
+    # Workload by member
+    user_by_id = {u["id"]: u for u in users}
+    workload = []
+    for u in users:
+        c = sum(1 for j in jobs if u["id"] in (j.get("assignees") or []) and j["status"] in open_statuses)
+        workload.append((u, c))
+    workload.sort(key=lambda x: x[1], reverse=True)
+    non_admin_workload = [w for w in workload if not w[0].get("is_admin")]
+    top_loaded = f"{non_admin_workload[0][0]['name']} ({non_admin_workload[0][1]} open)" if non_admin_workload else "—"
+    least_loaded_pool = [w for w in non_admin_workload if w[1] < (non_admin_workload[0][1] if non_admin_workload else 0)]
+    least_loaded = f"{least_loaded_pool[-1][0]['name']} ({least_loaded_pool[-1][1]} open)" if least_loaded_pool else "—"
+
+    # Top client by open workload + silent clients
+    client_open: dict[str, int] = {}
+    client_last_touch: dict[str, str] = {}
+    for j in jobs:
+        cid = j.get("client")
+        if not cid:
+            continue
+        if j["status"] in open_statuses:
+            client_open[cid] = client_open.get(cid, 0) + 1
+        touch = j.get("updatedAt") or j.get("createdAt") or ""
+        if touch and touch > client_last_touch.get(cid, ""):
+            client_last_touch[cid] = touch
+    cname = {c["id"]: c["name"] for c in clients}
+    if client_open:
+        top_cid = max(client_open, key=client_open.get)
+        top_client = f"{cname.get(top_cid, top_cid)} ({client_open[top_cid]} open)"
+    else:
+        top_client = "—"
+    silent = [cname[cid] for cid in cname if client_last_touch.get(cid, "") < week_ago_iso]
+
+    workload_block = "\n".join(f"- {u['name']} ({u.get('role_label','?')}): {c} open" for (u, c) in non_admin_workload)
+    clients_block = "\n".join(
+        f"- {cname[c['id']]}: {client_open.get(c['id'],0)} open, last activity {(client_last_touch.get(c['id']) or 'never')[:10]}"
+        for c in clients
+    )
+
+    return {
+        "done_week": done_week,
+        "active_total": active_total,
+        "overdue": overdue,
+        "pending_approvals": pending_approvals,
+        "top_client": top_client,
+        "top_loaded": top_loaded,
+        "least_loaded": least_loaded,
+        "scope_flags": scope_flags,
+        "silent_clients": ", ".join(silent) if silent else "none",
+        "mentions_yusuf": notifs,
+        "workload_block": workload_block or "- (no team data)",
+        "clients_block": clients_block or "- (no clients)",
+    }
+
+
+@api.get("/ai/manager-digest")
+async def ai_manager_digest(refresh: bool = False, _: dict = Depends(manager_only)):
+    """Yusuf's Monday morning 'State of the Agency' digest. Cached per ISO week; ?refresh=true regenerates."""
+    week_key = _iso_week_key()
+    if not refresh:
+        cached = await db.manager_digests.find_one({"week": week_key}, {"_id": 0})
+        if cached:
+            return cached
+    stats = await _build_digest_stats()
+    system = await build_active_system_prompt()
+    try:
+        digest = await ai_service.manager_digest(stats, system_prompt=system)
+    except Exception as e:
+        digest = (
+            f"🔥 {stats['done_week']} jobs shipped this week — solid pace.\n"
+            f"⚠️ Watch {stats['top_loaded']} — heaviest workload right now.\n"
+            f"🚨 Client at risk: {stats['top_client']} needs your attention.\n"
+            f"✨ Free capacity on {stats['least_loaded']} — reroute one job.\n"
+            f"🎯 Clear the {stats['pending_approvals']} pending approvals first thing today."
+        )
+    doc = {
+        "week": week_key,
+        "digest": digest.strip(),
+        "stats": stats,
+        "generated_at": _now_iso(),
+    }
+    await db.manager_digests.replace_one({"week": week_key}, doc, upsert=True)
+    doc.pop("_id", None)
+    return doc
+
+
 # ---------- prompt studio + templates ----------
 
 DEFAULT_PROMPT_SETTINGS = {

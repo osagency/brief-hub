@@ -34,6 +34,7 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **Mobile drawer sidebar** — hamburger menu on `<md`, sidebar slides in as overlay.
 - **Notification poller** — polls every 45 s and surfaces new unread notifications as toast, so @mentions and job pings feel real-time.
 - **`EmptyState` component** — friendly shared empty state (gradient icon + copy), applied to My Day.
+- **AI Manager Digest** — `GET /api/ai/manager-digest` (admin only). Claude Sonnet 4.5 reads last-7-day aggregate stats (done/overdue/pending approvals/top-loaded person/top client/silent clients/scope flags/@mentions) and writes a 5-bullet Monday briefing with 🔥⚠️🚨✨🎯 markers. Cached in Mongo per ISO week (`manager_digests` collection); Refresh button regenerates. Deterministic fallback if AI errors.
 
 ## Removed / Deferred
 - Invoice section, retainer amounts, monthly revenue — all removed.

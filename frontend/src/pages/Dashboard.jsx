@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { fmtDate, STATUS_LABEL, ROLE_EMOJI, ROLE_COLOR } from "../lib/constants";
-import { Briefcase, AlertTriangle, Clock, TrendingUp } from "lucide-react";
+import { Briefcase, AlertTriangle, Clock, TrendingUp, Sparkles, RefreshCw, Loader2 } from "lucide-react";
 import JobDetailModal from "../components/JobDetailModal";
+import { useAuth } from "../lib/auth";
 
 const StatCard = ({ label, value, tone, icon: Icon, testid }) => {
   const tones = {
@@ -23,18 +24,85 @@ const StatCard = ({ label, value, tone, icon: Icon, testid }) => {
   );
 };
 
+function ManagerDigest() {
+  const [state, setState] = useState({ loading: true, digest: "", generated_at: "", error: "" });
+
+  const load = async (refresh = false) => {
+    setState((s) => ({ ...s, loading: true, error: "" }));
+    try {
+      const { data } = await api.get("/ai/manager-digest", { params: refresh ? { refresh: true } : {} });
+      setState({ loading: false, digest: data.digest || "", generated_at: data.generated_at || "", error: "" });
+    } catch (e) {
+      setState({ loading: false, digest: "", generated_at: "", error: e?.response?.data?.detail || "Could not load digest" });
+    }
+  };
+  useEffect(() => { load(false); }, []);
+
+  const lines = (state.digest || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const when = state.generated_at ? new Date(state.generated_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+
+  return (
+    <div
+      className="rounded-[16px] p-6 text-white relative overflow-hidden"
+      style={{ background: "linear-gradient(120deg, #0F172A 0%, #4361EE 60%, #8B5CF6 100%)" }}
+      data-testid="manager-digest"
+    >
+      <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full opacity-30" style={{ background: "radial-gradient(circle, #EC4899, transparent 70%)" }} />
+      <div className="flex items-start justify-between gap-4 relative">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-[11px] uppercase mono tracking-widest opacity-80">
+            <Sparkles size={14} /> AI Manager Digest · Monday briefing
+          </div>
+          <h2 className="text-xl font-semibold mt-1.5">State of the agency · this week</h2>
+          {when && <div className="text-[11px] mono opacity-70 mt-0.5">Generated {when}</div>}
+        </div>
+        <button
+          onClick={() => load(true)}
+          disabled={state.loading}
+          data-testid="digest-refresh"
+          className="h-9 px-3 rounded-full bg-white/15 hover:bg-white/25 text-[12px] font-semibold flex items-center gap-1.5 backdrop-blur transition disabled:opacity-60 whitespace-nowrap"
+        >
+          {state.loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          {state.loading ? "Thinking…" : "Refresh"}
+        </button>
+      </div>
+
+      <div className="mt-5 relative">
+        {state.loading && !lines.length && (
+          <div className="space-y-2" data-testid="digest-loading">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-4 rounded bg-white/10 animate-pulse" style={{ width: `${90 - i * 8}%` }} />
+            ))}
+          </div>
+        )}
+        {state.error && !state.loading && (
+          <div className="text-sm bg-red-500/20 border border-red-300/30 rounded-md p-3" data-testid="digest-error">{state.error}</div>
+        )}
+        {!state.loading && lines.length > 0 && (
+          <ul className="space-y-2.5" data-testid="digest-bullets">
+            {lines.slice(0, 5).map((line, i) => (
+              <li key={i} className="text-[14px] leading-relaxed bg-white/10 backdrop-blur rounded-lg px-3 py-2" data-testid={`digest-bullet-${i}`}>
+                {line}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
+  const { user } = useAuth();
+  const isManager = !!user?.is_admin;
   const [jobs, setJobs] = useState([]);
   const [clients, setClients] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [users, setUsers] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
-  const [isManager, setIsManager] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const u = JSON.parse(localStorage.getItem("os_user") || "null");
-      setIsManager(u?.is_admin);
       const [jobsR, clientsR, apprR, usersR] = await Promise.all([
         api.get("/jobs"), api.get("/clients"), api.get("/approvals"), api.get("/users"),
       ]);
@@ -78,6 +146,8 @@ export default function Dashboard() {
         <div className="text-[11px] uppercase mono tracking-widest text-slate-500">Command Centre</div>
         <h1 className="text-2xl font-semibold text-slate-900 mt-1">Dashboard</h1>
       </div>
+
+      {isManager && <ManagerDigest />}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Active jobs" value={active} icon={Briefcase} testid="stat-active-jobs" />
