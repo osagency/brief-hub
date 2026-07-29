@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { ROLE_EMOJI, ROLE_COLOR, fmtDate, STATUS_LABEL } from "../lib/constants";
 import { X, Send, Mail, ListChecks, MessageSquare, Bell, Paperclip, Upload, Trash2, FileText, ImageIcon, File as FileIcon, Loader2, AtSign } from "lucide-react";
 import { AttachmentPreview } from "../pages/PublicApproval";
+import { celebrateJobDone } from "../lib/celebrate";
 
 const STAGES = ["Brief", "Create", "Review", "Approve", "Deliver"];
 const STATUS_TO_STAGE = { todo: 0, active: 1, review: 2, done: 4, overdue: 1 };
@@ -41,9 +42,13 @@ export default function JobDetailModal({ jobId, onClose, onUpdate, users, client
   const stageIdx = STATUS_TO_STAGE[job.status] ?? 0;
 
   const patch = async (updates) => {
+    const wasDone = job.status === "done";
     const { data } = await api.patch(`/jobs/${job.id}`, updates);
     setJob(data);
     onUpdate?.(data);
+    if (updates.status === "done" && !wasDone) {
+      celebrateJobDone(job.id, job.title);
+    }
   };
 
   const postComment = async () => {

@@ -25,6 +25,16 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - Passing tests: iter1 30/30, iter2 32/32, iter3 44/44, iter4 58/58, **iter5 71/71** — all backend + frontend green.
 - **Hardened iter-5**: regex-escaped search input (no ReDoS), one-time startup token backfill (GET is idempotent), 409 on re-decide, safe projection on public payload (no job.desc / assignees / hours leak), 80/4000 char caps on client-supplied fields.
 
+## What's Been Implemented (Feb 2026 — v2 delight pass)
+- **Openspace logo** wired into sidebar, mobile topbar, and login page (`/logos/openspace-logo.png`).
+- **Manager "View as…" impersonation** — admin picks any team member from topbar dropdown, sees the app exactly as they see it (My Day, filtered jobs, hidden manager-only routes). Amber banner + toast confirm the impersonation. Backend enforces via `X-View-As` header (admin-only). New: `ViewAsSwitcher` in Layout.
+- **Job-completion celebration** — canvas-confetti burst + "+XP Vibes shipped 🔥" toast + AI-generated personalised congrats (new `POST /api/ai/celebrate`). Fires from both drag-to-Done on the Board and the status dropdown in the Job Detail modal.
+- **Streak counter** — `GET /api/kpi/streak` returns consecutive-day completion streak + jobs completed today (respects role filter / impersonation). Rendered on **My Day** and **Vibes** (replacing the previously-hardcoded "7-day streak").
+- **Sound toggle** in topbar — optional subtle "ding" on job-done, muted by default.
+- **Mobile drawer sidebar** — hamburger menu on `<md`, sidebar slides in as overlay.
+- **Notification poller** — polls every 45 s and surfaces new unread notifications as toast, so @mentions and job pings feel real-time.
+- **`EmptyState` component** — friendly shared empty state (gradient icon + copy), applied to My Day.
+
 ## Removed / Deferred
 - Invoice section, retainer amounts, monthly revenue — all removed.
 - Real Gmail OAuth — pending user credentials
@@ -35,11 +45,14 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - Real Gmail OAuth ingestion (currently mocked seeded emails)
 - Object-storage-backed uploads for SOP attachments and brand assets
 - Send-gap-email actually delivers via Resend/SendGrid (currently simulated toast)
+- Auto-post approval + Resend-email client with magic link when job moves to `review` (needs Resend first)
+- Extend `EmptyState` to Approvals / Time / Reports / Clients when empty
 ### P2
 - Recurring-job auto-clone every week/month
 - Push notifications when a job status changes for assignees
-- Client-facing approval portal (magic link)
-- Export invoices as PDF
+- Client-facing approval portal (magic link)  — already shipped, keep polishing
+- Export invoices as PDF  — invoice module removed; skip
+- First-run onboarding tooltip tour for new team members
 ### P3
 - Chart-heavy KPI history over 6 months
 - Slack integration for standups and deadline pings
@@ -50,4 +63,4 @@ See `/app/memory/test_credentials.md`.
 ## Next Tasks
 - Wire real Gmail OAuth via Google Cloud project (needs Client ID/Secret from Yusuf)
 - Wire SendGrid/Resend for outbound gap-question and approval emails
-- Add ability to attach files to jobs (object storage)
+- Extend impersonation-aware analytics on manager Reports

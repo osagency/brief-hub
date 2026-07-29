@@ -2,8 +2,9 @@ import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
 import { fmtDate, STATUS_LABEL, ROLE_EMOJI, ROLE_COLOR } from "../lib/constants";
-import { Sunrise, AlertTriangle, Clock, Sparkles, Play, Loader2 } from "lucide-react";
+import { Sunrise, AlertTriangle, Clock, Sparkles, Play, Loader2, Flame } from "lucide-react";
 import JobDetailModal from "../components/JobDetailModal";
+import EmptyState from "../components/EmptyState";
 
 const scoreOf = (e) => (e.quality + e.csat + e.deadline + e.comm + e.initiative + e.collab) / 6;
 
@@ -13,10 +14,13 @@ export default function MyDay({ user }) {
   const [users, setUsers] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [standup, setStandup] = useState({ loading: false, text: "" });
+  const [streak, setStreak] = useState({ streak: 0, jobs_today: 0 });
 
   const load = async () => {
-    const [j, c, u] = await Promise.all([api.get("/jobs"), api.get("/clients"), api.get("/users")]);
-    setJobs(j.data); setClients(c.data); setUsers(u.data);
+    const [j, c, u, s] = await Promise.all([
+      api.get("/jobs"), api.get("/clients"), api.get("/users"), api.get("/kpi/streak").catch(() => ({ data: { streak: 0, jobs_today: 0 } })),
+    ]);
+    setJobs(j.data); setClients(c.data); setUsers(u.data); setStreak(s.data);
   };
   useEffect(() => { load(); }, []);
 
@@ -58,17 +62,29 @@ export default function MyDay({ user }) {
   return (
     <div className="space-y-6" data-testid="my-day">
       <div className="rounded-[16px] p-6 text-white relative overflow-hidden" style={{ background: "linear-gradient(120deg, #4361EE 0%, #06B6D4 100%)" }}>
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-[11px] uppercase mono tracking-widest opacity-90"><Sunrise size={14} /> My Day</div>
-            <h1 className="text-3xl font-semibold mt-2 tracking-tight">Hey {user?.name?.split(" ")[0] || "there"} 👋</h1>
+            <h1 className="text-2xl md:text-3xl font-semibold mt-2 tracking-tight">Hey {user?.name?.split(" ")[0] || "there"} 👋</h1>
             <div className="text-sm opacity-90 mt-1">
               {myOverdue.length > 0 && <span className="mr-3"><b>{myOverdue.length}</b> overdue</span>}
               {dueToday.length > 0 && <span className="mr-3"><b>{dueToday.length}</b> due today</span>}
               {myOverdue.length + dueToday.length === 0 && <span>Nothing on fire. Focus mode. 🎯</span>}
             </div>
+            <div className="flex items-center gap-3 mt-3">
+              {streak.streak > 0 && (
+                <div className="bg-white/20 backdrop-blur rounded-full px-3 py-1 flex items-center gap-1.5 text-[12px] font-medium" data-testid="streak-chip">
+                  <Flame size={13} /> {streak.streak}-day streak
+                </div>
+              )}
+              {streak.jobs_today > 0 && (
+                <div className="bg-white/20 backdrop-blur rounded-full px-3 py-1 text-[12px] font-medium" data-testid="jobs-today-chip">
+                  🎯 {streak.jobs_today} shipped today
+                </div>
+              )}
+            </div>
           </div>
-          <button onClick={generateStandup} disabled={standup.loading} data-testid="ai-standup-btn" className="px-3 h-9 rounded-md bg-white/20 backdrop-blur hover:bg-white/30 text-sm font-semibold flex items-center gap-1 disabled:opacity-60">
+          <button onClick={generateStandup} disabled={standup.loading} data-testid="ai-standup-btn" className="px-3 h-9 rounded-md bg-white/20 backdrop-blur hover:bg-white/30 text-sm font-semibold flex items-center gap-1 disabled:opacity-60 whitespace-nowrap">
             {standup.loading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} AI standup
           </button>
         </div>
@@ -114,10 +130,12 @@ export default function MyDay({ user }) {
       )}
 
       {jobs.length === 0 && (
-        <div className="card-surface p-10 text-center text-slate-500">
-          <div className="text-lg font-semibold text-slate-900">No jobs assigned yet</div>
-          <div className="text-sm mt-1">When Yusuf delegates work to you, it'll show up here.</div>
-        </div>
+        <EmptyState
+          icon={Sunrise}
+          title="No jobs assigned yet"
+          subtitle="When Yusuf delegates work to you, it'll show up here. Meanwhile, take a chai break ☕"
+          testid="myday-empty"
+        />
       )}
 
       {selectedJob && <JobDetailModal jobId={selectedJob} onClose={() => setSelectedJob(null)} users={users} clients={clients} onUpdate={() => load()} />}

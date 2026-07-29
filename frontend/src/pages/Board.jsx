@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { fmtDate, ROLE_EMOJI, ROLE_COLOR } from "../lib/constants";
 import { Repeat } from "lucide-react";
 import JobDetailModal from "../components/JobDetailModal";
+import { celebrateJobDone } from "../lib/celebrate";
 
 const COLUMNS = [
   { key: "todo", label: "To Do" },
@@ -34,11 +35,16 @@ export default function Board() {
     e.preventDefault();
     setDropTarget(null);
     if (!dragged || dragged.status === colKey) return;
+    const fromStatus = dragged.status;
+    const draggedRef = dragged;
     // optimistic
     setJobs(prev => prev.map(x => x.id === dragged.id ? { ...x, status: colKey } : x));
     try {
       await api.patch(`/jobs/${dragged.id}`, { status: colKey });
       toast.success(`Moved ${dragged.id} → ${COLUMNS.find(c => c.key === colKey)?.label}`);
+      if (colKey === "done" && fromStatus !== "done") {
+        celebrateJobDone(draggedRef.id, draggedRef.title);
+      }
     } catch (err) {
       toast.error("Failed to move — reverting");
       load();

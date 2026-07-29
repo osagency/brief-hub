@@ -78,7 +78,7 @@ export default function Vibes() {
             <div className="text-[11px] mono opacity-80 mt-2">— {quote.author}</div>
           </div>
           <div className="flex flex-col items-end gap-3">
-            <div className="bg-white/15 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-1 text-sm"><Flame size={14} /> <span className="mono">7-day streak</span></div>
+            <div className="bg-white/15 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-1 text-sm" data-testid="vibes-streak"><Flame size={14} /> <span className="mono">{streak.streak}-day streak</span></div>
             <button onClick={rotate} data-testid="rotate-quote" className="bg-white text-slate-900 rounded-full px-3 py-1.5 text-[12px] font-semibold flex items-center gap-1 hover:bg-white/90"><RotateCw size={12} /> New</button>
           </div>
         </div>

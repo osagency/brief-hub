@@ -8,6 +8,8 @@ const api = axios.create({ baseURL: API });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("os_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  const viewAs = localStorage.getItem("os_view_as_id");
+  if (viewAs) config.headers["X-View-As"] = viewAs;
   return config;
 });
 

@@ -61,7 +61,10 @@ def _sign(user_id: str) -> str:
     return jwt.encode({"sub": user_id, "exp": exp}, JWT_SECRET, algorithm=JWT_ALGO)
 
 
-async def current_user(authorization: Optional[str] = Header(None)) -> dict:
+async def current_user(
+    authorization: Optional[str] = Header(None),
+    x_view_as: Optional[str] = Header(None),
+) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing auth token")
     token = authorization.split(" ", 1)[1]
@@ -72,6 +75,12 @@ async def current_user(authorization: Optional[str] = Header(None)) -> dict:
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # Impersonation — only admins may impersonate; result acts as the target user
+    if x_view_as and user.get("is_admin") and x_view_as != user["id"]:
+        target = await db.users.find_one({"id": x_view_as}, {"_id": 0, "password_hash": 0})
+        if target:
+            target["_impersonated_by"] = user["id"]
+            return target
     return user
 
 
@@ -923,6 +932,53 @@ async def ai_job_help(body: JobHelpIn, user: dict = Depends(current_user)):
     system = await build_active_system_prompt()
     reply = await ai_service.job_help(body.kind, job, system_prompt=system)
     return {"reply": reply}
+
+
+@api.post("/ai/celebrate")
+async def ai_celebrate(body: JobHelpIn, user: dict = Depends(current_user)):
+    q = _apply_role_filter({"id": body.jobId}, user)
+    job = await db.jobs.find_one(q, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    client = await db.clients.find_one({"id": job.get("client")}, {"_id": 0}) or {}
+    system = await build_active_system_prompt()
+    try:
+        line = await ai_service.job_celebrate(
+            person=user["name"],
+            role=user.get("role_label", "team"),
+            client=client.get("name", job.get("client", "the client")),
+            title=job.get("title", ""),
+            system_prompt=system,
+        )
+    except Exception as e:
+        line = f"{user['name'].split()[0]} shipped {job.get('title','the job')} — certified beast mode 👑"
+    return {"line": line}
+
+
+@api.get("/kpi/streak")
+async def kpi_streak(user: dict = Depends(current_user)):
+    """Return the current user's completion streak (consecutive days with >=1 job done)
+    and how many jobs they've completed today. Team-member view — respects role filter."""
+    q = _apply_role_filter({"status": "done"}, user)
+    docs = await db.jobs.find(q, {"_id": 0, "updatedAt": 1, "id": 1}).to_list(1000)
+    # Bucket completed jobs by day (from updatedAt)
+    from collections import defaultdict
+    by_day: dict[str, int] = defaultdict(int)
+    for d in docs:
+        u = d.get("updatedAt") or ""
+        day = u[:10] if u else ""
+        if day:
+            by_day[day] += 1
+    today = datetime.now(timezone.utc).date().isoformat()
+    jobs_today = by_day.get(today, 0)
+    # Streak: walk backwards from today
+    streak = 0
+    cur = datetime.now(timezone.utc).date()
+    while by_day.get(cur.isoformat(), 0) > 0:
+        streak += 1
+        cur = cur - timedelta(days=1)
+    total_done = sum(by_day.values())
+    return {"streak": streak, "jobs_today": jobs_today, "total_done": total_done}
 
 
 # ---------- prompt studio + templates ----------

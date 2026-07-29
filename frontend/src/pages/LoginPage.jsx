@@ -30,8 +30,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-stretch bg-[#F4F6F9]">
       <div className="hidden lg:flex flex-col justify-between w-1/2 bg-[#0F172A] text-white p-14 relative overflow-hidden">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-lg bg-[#4361EE] flex items-center justify-center text-white font-bold">OS</div>
+        <div className="flex items-center gap-3">
+          <img src="/logos/openspace-logo.png" alt="Openspace" className="h-10 w-10 object-contain bg-white rounded-lg p-1" />
           <div>
             <div className="text-sm font-semibold">Openspace</div>
             <div className="text-[11px] text-slate-400 mono">osagency.in</div>

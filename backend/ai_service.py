@@ -304,3 +304,19 @@ async def job_help(kind: str, job: dict, system_prompt: str | None = None) -> st
     else:
         prompt = f"Write a 3-line standup update (Yesterday / Today / Blockers) for this job. Job: {json.dumps(job, default=str)}"
     return await chat_once(f"job-{job.get('id')}-{kind}", prompt, system=system_prompt)
+
+
+CELEBRATE_PROMPT = """A team member at Openspace just marked a job as DONE. Write ONE short, personal, playful congratulations line (max 18 words). No emojis at the start. One clever, Mumbai-agency-flavoured emoji at the end is welcome. Reference the person, the client and the work naturally. Do not use quotes.
+
+Person: {person}
+Role: {role}
+Client: {client}
+Job: {title}
+
+Return only the one line, nothing else."""
+
+
+async def job_celebrate(person: str, role: str, client: str, title: str, system_prompt: str | None = None) -> str:
+    prompt = CELEBRATE_PROMPT.format(person=person, role=role, client=client, title=title)
+    line = await chat_once(f"celebrate-{person}-{title[:20]}", prompt, system=system_prompt)
+    return line.strip().strip('"').strip("'")
