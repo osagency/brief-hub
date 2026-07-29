@@ -274,7 +274,6 @@ class UseTemplateIn(BaseModel):
     client: Optional[str] = None
     due: Optional[str] = None
 
-
 class ApprovalCommentIn(BaseModel):
     text: str
 
@@ -293,6 +292,20 @@ class PublicApprovalDecision(BaseModel):
 class PublicApprovalComment(BaseModel):
     text: str
     author: Optional[str] = None
+
+
+class FestivalIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    date: str  # YYYY-MM-DD
+    type: str = "festival"  # festival | holiday | brand | other
+    description: str = ""
+
+
+class FestivalPatch(BaseModel):
+    name: Optional[str] = None
+    date: Optional[str] = None
+    type: Optional[str] = None
+    description: Optional[str] = None
 
 
 # ---------- auth ----------
@@ -1094,6 +1107,107 @@ async def ai_manager_digest(refresh: bool = False, _: dict = Depends(manager_onl
     await db.manager_digests.replace_one({"week": week_key}, doc, upsert=True)
     doc.pop("_id", None)
     return doc
+
+
+# ---------- festivals & important dates ----------
+
+_ROLE_SKILLS = {
+    "writer": "long-form copy, blogs, captions, PR, LinkedIn posts, whitepapers, scripts",
+    "designer": "graphics, carousels, decks, event creatives, festival visuals, story frames",
+    "mktg": "SEO, ads, analytics, campaign scheduling, keyword research, funnel work",
+    "webdev": "WordPress, landing pages, speed optimisation, responsive fixes, quick microsites",
+    "clientsvc": "client emails, briefs, approvals, coordination, outreach, meeting prep",
+    "manager": "strategy, review, direction",
+}
+
+
+def _valid_date(s: str) -> bool:
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return True
+    except Exception:
+        return False
+
+
+@api.get("/festivals")
+async def list_festivals(_: dict = Depends(current_user)):
+    docs = await db.festivals.find({}).sort("date", 1).to_list(500)
+    return _clean_list(docs)
+
+
+@api.post("/festivals")
+async def create_festival(data: FestivalIn, _: dict = Depends(manager_only)):
+    if not _valid_date(data.date):
+        raise HTTPException(status_code=400, detail="Invalid date, expected YYYY-MM-DD")
+    if data.type not in ("festival", "holiday", "brand", "other"):
+        raise HTTPException(status_code=400, detail="Invalid type")
+    doc = {"id": f"fest-{uuid.uuid4().hex[:10]}", **data.model_dump()}
+    await db.festivals.insert_one(doc)
+    return _clean(doc)
+
+
+@api.patch("/festivals/{fest_id}")
+async def patch_festival(fest_id: str, data: FestivalPatch, _: dict = Depends(manager_only)):
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "date" in updates and not _valid_date(updates["date"]):
+        raise HTTPException(status_code=400, detail="Invalid date, expected YYYY-MM-DD")
+    if "type" in updates and updates["type"] not in ("festival", "holiday", "brand", "other"):
+        raise HTTPException(status_code=400, detail="Invalid type")
+    if not updates:
+        return {"ok": True}
+    r = await db.festivals.update_one({"id": fest_id}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Festival not found")
+    doc = await db.festivals.find_one({"id": fest_id})
+    return _clean(doc)
+
+
+@api.delete("/festivals/{fest_id}")
+async def delete_festival(fest_id: str, _: dict = Depends(manager_only)):
+    r = await db.festivals.delete_one({"id": fest_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Festival not found")
+    return {"ok": True}
+
+
+@api.post("/ai/idle-suggestions")
+async def ai_idle_suggestions(user: dict = Depends(current_user)):
+    """Proactive brand-work ideas when a team member has no open jobs. Uses upcoming
+    festivals (next 60 days), the team member's role, and Openspace's client roster."""
+    today = datetime.now(timezone.utc).date()
+    horizon = (today + timedelta(days=60)).isoformat()
+    today_iso = today.isoformat()
+    fests = await db.festivals.find(
+        {"date": {"$gte": today_iso, "$lte": horizon}},
+        {"_id": 0},
+    ).sort("date", 1).to_list(50)
+    clients = await db.clients.find({}, {"_id": 0}).to_list(50)
+    role_skills = _ROLE_SKILLS.get(user.get("role_key", "writer"), "brand work")
+    system = await build_active_system_prompt()
+    try:
+        data = await ai_service.idle_suggestions(
+            name=user["name"],
+            role_label=user.get("role_label", "team"),
+            role_skills=role_skills,
+            festivals=fests,
+            clients=clients,
+            system_prompt=system,
+        )
+        ideas = data.get("ideas", []) if isinstance(data, dict) else []
+    except Exception:
+        ideas = []
+    if not ideas:
+        # deterministic fallback so the UI always has something useful
+        fallback_client = clients[0] if clients else {"id": "", "name": "your top client"}
+        upcoming = fests[0] if fests else None
+        ideas = [{
+            "title": f"Draft a {upcoming['name']} post for {fallback_client['name']}" if upcoming else f"Refresh {fallback_client['name']}'s brand voice guide",
+            "brand": fallback_client.get("id", ""),
+            "brand_name": fallback_client.get("name", ""),
+            "tied_to": upcoming["name"] if upcoming else "evergreen",
+            "why": "AI is warming up — here's a safe starter idea. Refresh to get fresh AI-generated suggestions.",
+        }]
+    return {"ideas": ideas, "upcoming_festivals": fests[:8]}
 
 
 # ---------- prompt studio + templates ----------

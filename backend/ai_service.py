@@ -355,3 +355,46 @@ CLIENTS AT A GLANCE:
 async def manager_digest(stats: dict, system_prompt: str | None = None) -> str:
     prompt = DIGEST_PROMPT.format(**stats)
     return await chat_once("manager-digest", prompt, system=system_prompt)
+
+
+IDLE_SUGGESTIONS_PROMPT = """A team member at Openspace has zero jobs assigned right now — they're idle and need proactive brand-work ideas. Suggest 4 concrete ideas they could pick up.
+
+MEMBER: {name} ({role_label})
+ROLE SKILLS: {role_skills}
+
+UPCOMING FESTIVALS & IMPORTANT DATES (next 60 days, most recent first):
+{festivals_block}
+
+CLIENTS AND THEIR VOICE:
+{clients_block}
+
+INSTRUCTIONS:
+- Each idea must be actionable ("Design a 3-slide Raksha Bandhan carousel for Intercont+" — NOT "brainstorm content")
+- Prefer ideas tied to an upcoming festival where it fits the client's voice; if it doesn't fit, propose an evergreen idea (brand refresh, testimonial series, thought-leadership post)
+- Never propose the same client twice
+- Match the idea to THIS person's role (writer → copy, designer → visuals, mktg → analytics/ads, webdev → landing pages, clientsvc → outreach)
+
+Return ONLY valid JSON. No markdown fences. Structure:
+{{
+  "ideas": [
+    {{
+      "title": "short action title (max 12 words)",
+      "brand": "client_id (galalite|lumina|tkpl|intercont|safewater|smartco)",
+      "brand_name": "human client name",
+      "tied_to": "festival name or 'evergreen'",
+      "why": "one line explaining why this makes sense right now"
+    }},
+    ... 4 items ...
+  ]
+}}"""
+
+
+async def idle_suggestions(name: str, role_label: str, role_skills: str, festivals: list, clients: list, system_prompt: str | None = None) -> dict:
+    fest_block = "\n".join(f"- {f['date']}: {f['name']} ({f['type']}) — {f.get('description','')}" for f in festivals) or "(none in the next 60 days)"
+    cli_block = "\n".join(f"- {c['id']} · {c['name']}: {c.get('voice','')}" for c in clients) or "(no clients yet)"
+    prompt = IDLE_SUGGESTIONS_PROMPT.format(
+        name=name, role_label=role_label, role_skills=role_skills,
+        festivals_block=fest_block, clients_block=cli_block,
+    )
+    raw = await chat_once(f"idle-{name}", prompt, system=system_prompt)
+    return _extract_json(raw)

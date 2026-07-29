@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
 import { fmtDate, STATUS_LABEL, ROLE_EMOJI, ROLE_COLOR } from "../lib/constants";
-import { Sunrise, AlertTriangle, Clock, Sparkles, Play, Loader2, Flame } from "lucide-react";
+import { Sunrise, AlertTriangle, Clock, Sparkles, Play, Loader2, Flame, RefreshCw, Lightbulb } from "lucide-react";
 import JobDetailModal from "../components/JobDetailModal";
 import EmptyState from "../components/EmptyState";
+import { FEST_COLOR, FEST_LABEL } from "../components/ManageFestivalsModal";
 
 const scoreOf = (e) => (e.quality + e.csat + e.deadline + e.comm + e.initiative + e.collab) / 6;
 
@@ -129,16 +130,99 @@ export default function MyDay({ user }) {
         </div>
       )}
 
-      {jobs.length === 0 && (
-        <EmptyState
-          icon={Sunrise}
-          title="No jobs assigned yet"
-          subtitle="When Yusuf delegates work to you, it'll show up here. Meanwhile, take a chai break ☕"
-          testid="myday-empty"
-        />
+      {jobs.length === 0 && <IdleIdeas />}
+      {jobs.length > 0 && myOverdue.length === 0 && dueToday.length === 0 && nextUp.length === 0 && (
+        <IdleIdeas />
       )}
 
       {selectedJob && <JobDetailModal jobId={selectedJob} onClose={() => setSelectedJob(null)} users={users} clients={clients} onUpdate={() => load()} />}
+    </div>
+  );
+}
+
+function IdleIdeas() {
+  const [state, setState] = useState({ loading: true, ideas: [], festivals: [], error: "" });
+
+  const load = async () => {
+    setState((s) => ({ ...s, loading: true, error: "" }));
+    try {
+      const { data } = await api.post("/ai/idle-suggestions");
+      setState({ loading: false, ideas: data.ideas || [], festivals: data.upcoming_festivals || [], error: "" });
+    } catch (e) {
+      setState({ loading: false, ideas: [], festivals: [], error: e?.response?.data?.detail || "Could not load ideas" });
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="space-y-4" data-testid="idle-ideas">
+      <div
+        className="rounded-[16px] p-6 text-white relative overflow-hidden"
+        style={{ background: "linear-gradient(120deg, #8B5CF6 0%, #EC4899 60%, #F59E0B 100%)" }}
+      >
+        <div className="absolute -bottom-20 -right-20 w-64 h-64 rounded-full opacity-30" style={{ background: "radial-gradient(circle, #fff, transparent 70%)" }} />
+        <div className="relative flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 text-[11px] uppercase mono tracking-widest opacity-90">
+              <Lightbulb size={14} /> Free head-space · use it well
+            </div>
+            <h2 className="text-2xl font-semibold mt-1.5 leading-tight">You've got no jobs assigned — perfect time to think proactively.</h2>
+            <p className="text-sm opacity-90 mt-1 max-w-2xl">Here are 4 fresh ideas Claude picked for you, tied to upcoming festivals and your role. Pick one, pitch it to Yusuf, ship something people will actually notice.</p>
+          </div>
+          <button onClick={load} disabled={state.loading} data-testid="idle-refresh" className="h-9 px-3 rounded-full bg-white/20 hover:bg-white/30 text-[12px] font-semibold flex items-center gap-1.5 backdrop-blur transition disabled:opacity-60 whitespace-nowrap">
+            {state.loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            {state.loading ? "Thinking…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {state.error && <div className="text-sm text-red-600" data-testid="idle-error">{state.error}</div>}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {state.loading && !state.ideas.length && (
+          [0, 1, 2, 3].map((i) => (
+            <div key={i} className="card-surface p-4 animate-pulse">
+              <div className="h-3 bg-slate-200 rounded w-1/3 mb-2" />
+              <div className="h-4 bg-slate-200 rounded w-4/5 mb-2" />
+              <div className="h-3 bg-slate-100 rounded w-3/5" />
+            </div>
+          ))
+        )}
+        {!state.loading && state.ideas.map((idea, i) => (
+          <div key={i} data-testid={`idle-idea-${i}`} className="card-surface p-4 hover:border-[#4361EE] transition">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="chip status-active">{idea.brand_name || idea.brand}</span>
+              {idea.tied_to && idea.tied_to.toLowerCase() !== "evergreen" ? (
+                <span className="chip" style={{ background: "#F59E0B1A", color: "#F59E0B" }}>🎉 {idea.tied_to}</span>
+              ) : (
+                <span className="chip" style={{ background: "#06B6D41A", color: "#06B6D4" }}>Evergreen</span>
+              )}
+            </div>
+            <div className="text-[15px] font-semibold text-slate-900 mt-2 leading-snug">{idea.title}</div>
+            {idea.why && <div className="text-[12px] text-slate-500 mt-1.5 leading-relaxed">{idea.why}</div>}
+            <button
+              onClick={() => { navigator.clipboard?.writeText(idea.title); toast.success("Idea copied — pitch it to Yusuf"); }}
+              data-testid={`idle-copy-${i}`}
+              className="mt-3 text-[11px] mono uppercase tracking-widest text-[#4361EE] hover:underline"
+            >
+              Copy to pitch
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {state.festivals.length > 0 && (
+        <div className="card-surface p-4" data-testid="idle-festivals">
+          <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-2">Upcoming · next 60 days</div>
+          <div className="flex flex-wrap gap-2">
+            {state.festivals.map((f) => (
+              <span key={f.id} className="chip" style={{ background: FEST_COLOR[f.type] + "1A", color: FEST_COLOR[f.type] }} data-testid={`idle-fest-${f.id}`}>
+                {f.name} · {new Date(f.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

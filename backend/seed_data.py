@@ -128,6 +128,39 @@ NOTIFICATIONS = [
 ]
 
 
+# Seed set of major Indian festivals + brand-marketing days for the next ~12 months.
+# Dates are approximate and are meant to be edited from the UI (Manage important dates).
+# type: festival | holiday | brand | other
+FESTIVALS = [
+    {"name": "Valentine's Day",         "date": "2026-02-14", "type": "brand",    "description": "Brand-love themes; couple stories."},
+    {"name": "Maha Shivratri",          "date": "2026-02-26", "type": "festival", "description": "Devotional / cultural moment."},
+    {"name": "Holi",                    "date": "2026-03-06", "type": "festival", "description": "Festival of colours — high engagement day."},
+    {"name": "Women's Day",             "date": "2026-03-08", "type": "brand",    "description": "Women in leadership, client storytelling."},
+    {"name": "Ram Navami",              "date": "2026-03-30", "type": "festival", "description": "Regional festival — check client sensitivities."},
+    {"name": "Good Friday",             "date": "2026-04-03", "type": "holiday",  "description": "Reflective tone."},
+    {"name": "Ambedkar Jayanti",        "date": "2026-04-14", "type": "holiday",  "description": "National holiday."},
+    {"name": "Eid-ul-Fitr",             "date": "2026-04-21", "type": "festival", "description": "Ramadan ends — greetings, community."},
+    {"name": "Labour Day",              "date": "2026-05-01", "type": "holiday",  "description": "Salute-the-workforce content."},
+    {"name": "Mother's Day",            "date": "2026-05-10", "type": "brand",    "description": "Family / gratitude storytelling."},
+    {"name": "Father's Day",            "date": "2026-06-21", "type": "brand",    "description": "Family / mentorship storytelling."},
+    {"name": "Raksha Bandhan",          "date": "2026-08-09", "type": "festival", "description": "Sibling bond — big engagement day."},
+    {"name": "Independence Day",        "date": "2026-08-15", "type": "holiday",  "description": "National pride content."},
+    {"name": "Krishna Janmashtami",     "date": "2026-08-26", "type": "festival", "description": "Devotional / cultural moment."},
+    {"name": "Cinema Day (India)",      "date": "2026-08-27", "type": "brand",    "description": "Big day for Galalite & Lumina Screens."},
+    {"name": "Ganesh Chaturthi",        "date": "2026-09-14", "type": "festival", "description": "Huge Mumbai/Maharashtra moment."},
+    {"name": "Navratri begins",         "date": "2026-09-21", "type": "festival", "description": "9 nights — daily content opportunity."},
+    {"name": "Gandhi Jayanti",          "date": "2026-10-02", "type": "holiday",  "description": "National holiday."},
+    {"name": "Dussehra",                "date": "2026-10-05", "type": "festival", "description": "Victory-of-good storytelling."},
+    {"name": "Karva Chauth",            "date": "2026-10-20", "type": "festival", "description": "Family/couple storytelling."},
+    {"name": "Diwali",                  "date": "2026-11-08", "type": "festival", "description": "Biggest festival — plan campaigns 3–4 weeks ahead."},
+    {"name": "Guru Nanak Jayanti",      "date": "2026-11-24", "type": "festival", "description": "Sikh festival — devotional tone."},
+    {"name": "Christmas",               "date": "2026-12-25", "type": "festival", "description": "Warm, festive brand tone."},
+    {"name": "New Year's Eve",          "date": "2026-12-31", "type": "brand",    "description": "Year-end recap + resolution content."},
+    {"name": "Makar Sankranti / Pongal","date": "2027-01-14", "type": "festival", "description": "Harvest festival."},
+    {"name": "Republic Day",            "date": "2027-01-26", "type": "holiday",  "description": "National pride content."},
+]
+
+
 async def seed_if_empty(db):
     """Seed all collections if they are empty."""
     if await db.users.count_documents({}) == 0:
@@ -156,3 +189,8 @@ async def seed_if_empty(db):
         await db.timelogs.insert_many([{**t} for t in TIMELOGS])
     if await db.notifications.count_documents({}) == 0:
         await db.notifications.insert_many([{**n} for n in NOTIFICATIONS])
+    if await db.festivals.count_documents({}) == 0:
+        docs = []
+        for f in FESTIVALS:
+            docs.append({"id": f"fest-{uuid.uuid4().hex[:10]}", **f})
+        await db.festivals.insert_many(docs)

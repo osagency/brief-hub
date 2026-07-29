@@ -36,6 +36,12 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **`EmptyState` component** — friendly shared empty state (gradient icon + copy), applied to My Day.
 - **AI Manager Digest** — `GET /api/ai/manager-digest` (admin only). Claude Sonnet 4.5 reads last-7-day aggregate stats (done/overdue/pending approvals/top-loaded person/top client/silent clients/scope flags/@mentions) and writes a 5-bullet Monday briefing with 🔥⚠️🚨✨🎯 markers. Cached in Mongo per ISO week (`manager_digests` collection); Refresh button regenerates. Deterministic fallback if AI errors.
 
+## What's Been Implemented (Feb 2026 — v3 festivals + proactive ideas)
+- **Festivals & important dates** — new `festivals` MongoDB collection + full CRUD `/api/festivals` (managers add/edit/delete; everyone reads). Seeded with 26 major Indian festivals + brand-marketing days spanning Feb 2026 → Feb 2027 (Diwali, Holi, Raksha Bandhan, Ganesh Chaturthi, Navratri, Eid, Independence Day, Republic Day, Christmas, Cinema Day, Women's/Mother's/Father's Day, etc.).
+- **Manage Important Dates modal** — right-side drawer on the Content Calendar. Add / edit / delete festivals grouped by month, type-colour coded (Festival / Holiday / Brand day / Other).
+- **Calendar overlay** — festival badges under each date-header day in the client-vs-day grid, colour-tinted cell backgrounds on festival days, an "Upcoming · next 60 days" horizontal strip above the grid, and a click-through popover with description. Added ‹ › month navigation.
+- **AI proactive ideas when idle** — `POST /api/ai/idle-suggestions`. When a team member has no meaningful open jobs on My Day, replace the flat empty state with a purple/pink gradient "Free head-space · use it well" panel. Claude reads their role skills, Openspace's clients (with voice guides), and the next 60 days of festivals, and returns 4 concrete role-matched ideas (each with brand + festival tie-in + one-line rationale). Each idea has a **"Copy to pitch"** action to send to Yusuf. Deterministic fallback if AI errors.
+
 ## Removed / Deferred
 - Invoice section, retainer amounts, monthly revenue — all removed.
 - Real Gmail OAuth — pending user credentials
