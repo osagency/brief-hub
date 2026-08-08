@@ -281,8 +281,12 @@ function AddLeadModal({ users, onClose, onCreated }) {
   useEffect(() => {
     if (!form.company && !form.contact_email) return setDupes([]);
     const t = setTimeout(async () => {
-      const { data } = await api.get("/leads/dedup", { params: { company: form.company, email: form.contact_email } });
-      setDupes(data.matches || []);
+      try {
+        const { data } = await api.get("/leads/dedup", { params: { company: form.company, email: form.contact_email } });
+        setDupes(data.matches || []);
+      } catch {
+        setDupes([]);
+      }
     }, 300);
     return () => clearTimeout(t);
   }, [form.company, form.contact_email]);
