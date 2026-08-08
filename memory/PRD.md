@@ -71,6 +71,37 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 
 **Seed additions** — birthdays, joining dates, blood groups on all users · 4 pre-seeded policies · 1 welcome announcement · 2 sample activities · 2 sample outings (monthly + quarterly) with checklists · 2 extra public holidays.
 
+## What's Been Implemented (Feb 2026 — v5 Leads pipeline)
+
+**Full leads/CRM module** — `/leads` page with three views (Table, Kanban board, Funnel), all backed by 22+ endpoints under `/api/leads/*` + inbound webhook `/api/webhooks/leads/inbound`.
+
+Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_queue`. Helper module `leads_service.py` for ICP scoring, dedup keys, sequence offsets, staleness detection.
+
+**Data model** — company, contact name/email/phone, source (outbound/inbound/manual), channel (LinkedIn/Apollo/Google Maps/SEO/Referral/Website form/Event/Other), 5 ICP flags (family_run · startup · other_b2b · gap_or_funding · responsive_48h auto-flipped on touch), auto-computed ICP score + tier (qualified when 2 of 3 signals present), 9 statuses (new · contacted · qualified · nurturing · call_scheduled · proposal_sent · won · onboarding · lost), owner (defaults to BD/Kritika), first-touch/last-activity, recycle date, notes, expected deal size, structured lost reason enum, onboarding sub-checklist.
+
+**Rules enforced:**
+- Dedup on create (email OR normalized company OR non-generic email-domain) → 409 with matches; `allow_duplicate:true` bypass.
+- AI ICP classify — Claude classifies `family_run/startup/other_b2b/gap_or_funding` from company + notes on outbound/inbound creation.
+- New → Contacted auto-flip on first logged touch.
+- Nurture queue enqueued on creation (4-step outbound over 12 days · 3-step inbound over 2 days). Actual sending offloaded to Make.com via `LEADS_OUTBOUND_WEBHOOK` env.
+- `POST /leads/{id}/booking` → status → call_scheduled + owner notification.
+- `POST /leads/{id}/status` — enforces lost-requires-reason+recycle-date, capacity-cap warnings (Proposal 8/mo + Won 5/mo, configurable; warns, doesn't block), Won auto-becomes Onboarding.
+- Onboarding checklist (4 items). All-4-done → auto-creates the client in `/api/clients` + notifies Yusuf + Kritika + fires outbound webhook.
+- `POST /leads/maintenance/run` (idempotent) auto-resurfaces lost leads whose recycle date has arrived AND posts stale-lead alerts (>14 days untouched in contacted/qualified/nurturing).
+
+**Frontend features:**
+- Table view with source/status/search filters
+- Kanban board (drag-drop across 8 statuses; drop-to-lost opens the reason form)
+- Funnel view (bar chart per stage + total value + conversion % + total pipeline stats)
+- Add-lead modal with **live dedup preview** as user types (shows matches with "Create anyway" escape hatch)
+- Lead detail drawer with 4 tabs: **Overview** (ICP flags editable, notes autosave, status changer with lost/proposal-link forms, schedule-call button), **Activity** (typed touches: call/email/linkedin/meeting/note), **AI intro** (Claude drafts personalised cold email as Kritika, copy-to-clipboard), **Onboarding** (4-item checklist, auto-triggers client handoff when complete)
+- Capacity warning banner at page-top when monthly caps reached
+- Sidebar entry under Clients section: **Leads** → Clients
+
+**Automation hooks (Make.com):**
+- Inbound: `POST /api/webhooks/leads/inbound` with `X-Webhook-Secret` header (env `LEADS_INBOUND_SECRET`). Returns `duplicate_flagged` if match — Make.com can decide.
+- Outbound: on any status change / booking / onboarding-complete, fires `POST` to `LEADS_OUTBOUND_WEBHOOK` env with `{event, lead, timestamp}` — Make.com routes to Gmail / Slack / WhatsApp / etc.
+
 ## Removed / Deferred
 - Invoice section, retainer amounts, monthly revenue — all removed.
 - Real Gmail OAuth — pending user credentials

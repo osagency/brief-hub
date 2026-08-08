@@ -24,6 +24,7 @@ import MyDay from "./pages/MyDay";
 import PublicApproval from "./pages/PublicApproval";
 import Leaves from "./pages/Leaves";
 import HRHub from "./pages/HRHub";
+import Leads from "./pages/Leads";
 import "./App.css";
 
 function Protected({ children, managerOnly }) {
@@ -63,6 +64,7 @@ function AppRoutes() {
       <Route path="/prompts" element={<Protected managerOnly><PromptStudio /></Protected>} />
       <Route path="/leaves" element={<Protected><Leaves /></Protected>} />
       <Route path="/hr" element={<Protected><HRHub /></Protected>} />
+      <Route path="/leads" element={<Protected><Leads /></Protected>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

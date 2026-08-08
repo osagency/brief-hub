@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Inbox, Bell, Briefcase, KanbanSquare,
   Calendar, CheckCircle2, Timer, Users, LineChart, BookOpen,
   BarChart3, Sparkles, Trophy, LogOut, Search, UsersRound, Wand2,
-  Menu, X, Eye, EyeOff, Volume2, VolumeX, ChevronDown, CalendarCheck, HeartHandshake
+  Menu, X, Eye, EyeOff, Volume2, VolumeX, ChevronDown, CalendarCheck, HeartHandshake, Rocket
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
@@ -32,6 +32,7 @@ const SECTIONS = [
   {
     label: "Clients",
     items: [
+      { to: "/leads", label: "Leads", icon: Rocket, testid: "nav-leads" },
       { to: "/clients", label: "Clients", icon: Users, testid: "nav-clients" },
     ],
   },

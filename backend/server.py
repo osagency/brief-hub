@@ -20,6 +20,7 @@ import seed_data
 import ai_service
 import storage_service
 import hr_service
+import leads_service
 
 
 ROOT_DIR = Path(__file__).parent
@@ -2136,7 +2137,6 @@ async def root():
     return {"service": "openspace-agency-os", "status": "ok"}
 
 
-app.include_router(api)
 app.include_router(public_api)
 
 app.add_middleware(
@@ -2164,3 +2164,588 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     mongo_client.close()
+
+
+# ============================================================================
+# LEADS MODULE
+# ============================================================================
+
+class LeadIn(BaseModel):
+    company: str = Field(min_length=1, max_length=200)
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    source: str = "manual"  # outbound | inbound | manual
+    channel: str = "Other"
+    icp_flags: Dict[str, bool] = {}
+    status: Optional[str] = None
+    owner_id: Optional[str] = None
+    notes: str = ""
+    expected_deal_size: float = 0
+    allow_duplicate: bool = False  # bypass dedup after confirmation
+
+
+class LeadPatch(BaseModel):
+    company: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    channel: Optional[str] = None
+    icp_flags: Optional[Dict[str, bool]] = None
+    owner_id: Optional[str] = None
+    notes: Optional[str] = None
+    expected_deal_size: Optional[float] = None
+    recycle_date: Optional[str] = None
+
+
+class LeadStatusChange(BaseModel):
+    status: str
+    lost_reason: Optional[str] = None
+    lost_reason_note: Optional[str] = None
+    recycle_date: Optional[str] = None
+    proposal_link: Optional[str] = None
+
+
+class LeadTouchIn(BaseModel):
+    kind: str  # call | email | linkedin | note | meeting
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class LeadMergeIn(BaseModel):
+    keep_id: str
+    remove_id: str
+
+
+class LeadSettingsPatch(BaseModel):
+    proposal_cap_monthly: Optional[int] = None
+    won_cap_monthly: Optional[int] = None
+
+
+class LeadOnboardingPatch(BaseModel):
+    contract_sent: Optional[bool] = None
+    contract_signed: Optional[bool] = None
+    payment_confirmed: Optional[bool] = None
+    first_brief_scheduled: Optional[bool] = None
+    complete: Optional[bool] = None
+
+
+async def _emit_lead_webhook(event: str, lead: dict) -> None:
+    """Outbound webhook — fires to WEBHOOK_URL (Make.com etc.) on lifecycle events.
+    Silent no-op if env is not configured."""
+    url = os.environ.get("LEADS_OUTBOUND_WEBHOOK")
+    if not url:
+        return
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(url, json={"event": event, "lead": lead, "timestamp": _now_iso()})
+    except Exception as e:
+        logger.warning(f"outbound webhook failed: {e}")
+
+
+async def _find_duplicates(company: str, email: str, exclude_id: str | None = None) -> list[dict]:
+    norm = leads_service.normalize_company(company)
+    dom = leads_service.email_domain(email)
+    q: dict = {"$or": []}
+    if norm:
+        q["$or"].append({"dedup_company": norm})
+    if email:
+        q["$or"].append({"contact_email": email.lower().strip()})
+    if dom and dom not in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "protonmail.com", "icloud.com"):
+        q["$or"].append({"email_domain": dom})
+    if not q["$or"]:
+        return []
+    if exclude_id:
+        q["id"] = {"$ne": exclude_id}
+    return _clean_list(await db.leads.find(q, {"_id": 0}).to_list(10))
+
+
+async def _month_status_count(status: str, month: str | None = None) -> int:
+    mk = month or leads_service.month_key()
+    return await db.leads.count_documents({"status": status, "status_month": mk})
+
+
+async def _get_lead_settings() -> dict:
+    doc = await db.lead_settings.find_one({"id": "singleton"}, {"_id": 0})
+    if doc:
+        return doc
+    doc = {"id": "singleton", "proposal_cap_monthly": 8, "won_cap_monthly": 5}
+    await db.lead_settings.insert_one({**doc})
+    return doc
+
+
+async def _log_touch(lead_id: str, kind: str, text: str, author_id: str = "system", meta: dict | None = None) -> None:
+    await db.lead_touches.insert_one({
+        "id": f"touch-{uuid.uuid4().hex[:10]}",
+        "lead_id": lead_id, "kind": kind, "text": text,
+        "author_id": author_id, "timestamp": _now_iso(),
+        "meta": meta or {},
+    })
+    await db.leads.update_one({"id": lead_id}, {"$set": {"last_activity_at": _now_iso()}})
+
+
+async def _schedule_nurture(lead: dict) -> None:
+    """Enqueue nurture sequence steps in the queue collection.
+    Actual sending is handled by Make.com via the outbound webhook."""
+    seq = leads_service.outbound_sequence_offsets() if lead["source"] == "outbound" else leads_service.inbound_sequence_offsets()
+    if lead["source"] == "manual":
+        return
+    now = datetime.now(timezone.utc)
+    for step in seq:
+        scheduled = now + timedelta(days=step["day_offset"])
+        await db.lead_nurture_queue.insert_one({
+            "id": f"nq-{uuid.uuid4().hex[:10]}",
+            "lead_id": lead["id"], "step": step["step"], "purpose": step["purpose"],
+            "scheduled_at": scheduled.isoformat(),
+            "status": "queued", "sent_at": None,
+            "draft_subject": None, "draft_body": None,
+        })
+
+
+async def _default_owner_id() -> str:
+    """BD by default — Kritika. Falls back to first admin if not seeded."""
+    u = await db.users.find_one({"role_key": "clientsvc"}, {"_id": 0, "id": 1})
+    if u:
+        return u["id"]
+    u = await db.users.find_one({"is_admin": True}, {"_id": 0, "id": 1})
+    return u["id"] if u else "u_yusuf"
+
+
+@api.get("/leads")
+async def leads_list(
+    status_: Optional[str] = None,
+    source: Optional[str] = None,
+    channel: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    _: dict = Depends(current_user),
+):
+    q: dict = {}
+    if status_: q["status"] = status_
+    if source: q["source"] = source
+    if channel: q["channel"] = channel
+    if owner_id: q["owner_id"] = owner_id
+    docs = _clean_list(await db.leads.find(q, {"_id": 0}).sort("last_activity_at", -1).to_list(2000))
+    return docs
+
+
+@api.get("/leads/settings")
+async def leads_settings_get(_: dict = Depends(manager_only)):
+    return await _get_lead_settings()
+
+
+@api.patch("/leads/settings")
+async def leads_settings_patch(body: LeadSettingsPatch, _: dict = Depends(manager_only)):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        return await _get_lead_settings()
+    await db.lead_settings.update_one({"id": "singleton"}, {"$set": updates}, upsert=True)
+    return await _get_lead_settings()
+
+
+@api.get("/leads/dedup")
+async def leads_dedup(company: str = "", email: str = "", _: dict = Depends(current_user)):
+    return {"matches": await _find_duplicates(company, email)}
+
+
+@api.get("/leads/funnel")
+async def leads_funnel(source: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None, _: dict = Depends(current_user)):
+    q: dict = {}
+    if source: q["source"] = source
+    if from_date or to_date:
+        q["created_at"] = {}
+        if from_date: q["created_at"]["$gte"] = from_date
+        if to_date: q["created_at"]["$lte"] = to_date + "T23:59:59"
+    docs = _clean_list(await db.leads.find(q, {"_id": 0, "id": 1, "status": 1, "expected_deal_size": 1}).to_list(5000))
+    stages = ["new", "contacted", "qualified", "call_scheduled", "proposal_sent", "won"]
+    counts = {s: 0 for s in stages}
+    value = {s: 0.0 for s in stages}
+    counts["nurturing"] = 0
+    counts["lost"] = 0
+    counts["onboarding"] = 0
+    for d in docs:
+        s = d.get("status", "new")
+        counts[s] = counts.get(s, 0) + 1
+        if s in value:
+            value[s] += float(d.get("expected_deal_size") or 0)
+    # Conversion rates (drop-off)
+    conv = {}
+    prev = counts.get("contacted", 0)
+    for s in stages[2:]:  # qualified onward
+        conv[s] = round(100 * counts.get(s, 0) / prev, 1) if prev else 0
+        prev = counts.get(s, 0) if s != "call_scheduled" else prev
+    return {"total": len(docs), "counts": counts, "value": value, "conversion": conv}
+
+
+@api.post("/leads")
+async def leads_create(body: LeadIn, user: dict = Depends(current_user)):
+    # Dedup first
+    dupes = await _find_duplicates(body.company, body.contact_email)
+    if dupes and not body.allow_duplicate:
+        raise HTTPException(status_code=409, detail={"code": "duplicate", "matches": dupes})
+
+    # Merge with defaults
+    icp = leads_service.default_lead_flags()
+    icp.update(body.icp_flags or {})
+
+    # AI classify for outbound/inbound (skip manual — manual usually knows their own ICP)
+    if body.source in ("outbound", "inbound"):
+        try:
+            system = await build_active_system_prompt()
+            ai_flags = await ai_service.lead_icp_classify(body.company, body.notes, body.channel, system_prompt=system)
+            for k in ("family_run", "startup", "other_b2b", "gap_or_funding"):
+                if k in (ai_flags or {}):
+                    icp[k] = bool(ai_flags[k])
+        except Exception as e:
+            logger.warning(f"ICP classify failed: {e}")
+
+    icp_score, icp_tier = leads_service.compute_icp_score(icp)
+    owner_id = body.owner_id or await _default_owner_id()
+    status = body.status or "new"
+
+    lead = {
+        "id": f"lead-{uuid.uuid4().hex[:10]}",
+        "company": body.company.strip(),
+        "dedup_company": leads_service.normalize_company(body.company),
+        "contact_name": body.contact_name.strip(),
+        "contact_email": (body.contact_email or "").lower().strip(),
+        "email_domain": leads_service.email_domain(body.contact_email),
+        "contact_phone": body.contact_phone.strip(),
+        "source": body.source if body.source in leads_service.SOURCES else "manual",
+        "channel": body.channel,
+        "icp_flags": icp,
+        "icp_score": icp_score,
+        "icp_tier": icp_tier,
+        "status": status,
+        "status_month": leads_service.month_key(),
+        "owner_id": owner_id,
+        "first_touch_at": _now_iso(),
+        "last_activity_at": _now_iso(),
+        "recycle_date": None,
+        "notes": body.notes or "",
+        "expected_deal_size": float(body.expected_deal_size or 0),
+        "lost_reason": None,
+        "lost_reason_note": "",
+        "onboarding": {"contract_sent": False, "contract_signed": False, "payment_confirmed": False, "first_brief_scheduled": False, "complete": False},
+        "proposal_link": None,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    }
+    await db.leads.insert_one({**lead})
+    await _log_touch(lead["id"], "note", f"Lead created via {body.source} ({body.channel})", author_id=user["id"])
+    await _schedule_nurture(lead)
+    await _emit_lead_webhook("lead.created", lead)
+    lead.pop("_id", None)
+    return lead
+
+
+@api.get("/leads/{lead_id}")
+async def leads_get(lead_id: str, _: dict = Depends(current_user)):
+    doc = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return _clean(doc)
+
+
+@api.patch("/leads/{lead_id}")
+async def leads_patch(lead_id: str, body: LeadPatch, user: dict = Depends(current_user)):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "icp_flags" in updates:
+        merged = leads_service.default_lead_flags()
+        existing = (await db.leads.find_one({"id": lead_id}, {"_id": 0, "icp_flags": 1})) or {}
+        merged.update(existing.get("icp_flags") or {})
+        merged.update(updates["icp_flags"])
+        updates["icp_flags"] = merged
+        score, tier = leads_service.compute_icp_score(merged)
+        updates["icp_score"] = score
+        updates["icp_tier"] = tier
+    if "company" in updates:
+        updates["dedup_company"] = leads_service.normalize_company(updates["company"])
+    if "contact_email" in updates:
+        updates["contact_email"] = (updates["contact_email"] or "").lower().strip()
+        updates["email_domain"] = leads_service.email_domain(updates["contact_email"])
+    updates["updated_at"] = _now_iso()
+    updates["last_activity_at"] = _now_iso()
+    r = await db.leads.update_one({"id": lead_id}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    doc = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    await _log_touch(lead_id, "note", f"Updated by {user['name']}", author_id=user["id"])
+    return _clean(doc)
+
+
+@api.delete("/leads/{lead_id}")
+async def leads_delete(lead_id: str, _: dict = Depends(manager_only)):
+    r = await db.leads.delete_one({"id": lead_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.lead_touches.delete_many({"lead_id": lead_id})
+    await db.lead_nurture_queue.delete_many({"lead_id": lead_id})
+    return {"ok": True}
+
+
+@api.post("/leads/{lead_id}/status")
+async def leads_status(lead_id: str, body: LeadStatusChange, user: dict = Depends(current_user)):
+    if body.status not in leads_service.LEAD_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    settings_ = await _get_lead_settings()
+    updates: dict = {"status": body.status, "status_month": leads_service.month_key(), "updated_at": _now_iso(), "last_activity_at": _now_iso()}
+
+    # Rule: Lost requires reason
+    if body.status == "lost":
+        if not body.lost_reason or body.lost_reason not in leads_service.LOST_REASONS:
+            raise HTTPException(status_code=400, detail="Lost requires a valid reason")
+        if not body.recycle_date:
+            raise HTTPException(status_code=400, detail="Lost requires a recycle date")
+        updates.update({"lost_reason": body.lost_reason, "lost_reason_note": body.lost_reason_note or "", "recycle_date": body.recycle_date})
+
+    # Capacity cap — warn, don't block
+    warning = None
+    if body.status == "proposal_sent":
+        cnt = await _month_status_count("proposal_sent")
+        if cnt >= settings_["proposal_cap_monthly"]:
+            warning = f"Monthly Proposal cap reached ({cnt}/{settings_['proposal_cap_monthly']}) — capacity might be strained."
+        if body.proposal_link:
+            updates["proposal_link"] = body.proposal_link
+    if body.status == "won":
+        cnt = await _month_status_count("won")
+        if cnt >= settings_["won_cap_monthly"]:
+            warning = f"Monthly Won cap reached ({cnt}/{settings_['won_cap_monthly']}) — team may be at capacity."
+        # Won → onboarding starts
+        updates["status"] = "onboarding"
+
+    await db.leads.update_one({"id": lead_id}, {"$set": updates})
+    doc = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    await _log_touch(lead_id, "note", f"Status → {updates['status']}" + (f" (reason: {body.lost_reason})" if body.status == "lost" else ""), author_id=user["id"])
+    await _emit_lead_webhook(f"lead.status.{updates['status']}", doc)
+    return {"lead": _clean(doc), "warning": warning}
+
+
+@api.post("/leads/{lead_id}/touches")
+async def leads_touch_add(lead_id: str, body: LeadTouchIn, user: dict = Depends(current_user)):
+    if body.kind not in ("call", "email", "linkedin", "note", "meeting"):
+        raise HTTPException(status_code=400, detail="Invalid touch kind")
+    if not await db.leads.find_one({"id": lead_id}, {"_id": 1}):
+        raise HTTPException(status_code=404, detail="Not found")
+    await _log_touch(lead_id, body.kind, body.text, author_id=user["id"])
+    # Any contact touch → mark responsive within 48h if within 2 days of first_touch
+    if body.kind in ("call", "email", "linkedin", "meeting"):
+        lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+        if lead:
+            try:
+                first = datetime.fromisoformat(lead["first_touch_at"].replace("Z", "+00:00"))
+                if (datetime.now(timezone.utc) - first).total_seconds() <= 48 * 3600:
+                    flags = dict(lead.get("icp_flags") or {})
+                    flags["responsive_48h"] = True
+                    score, tier = leads_service.compute_icp_score(flags)
+                    await db.leads.update_one({"id": lead_id}, {"$set": {"icp_flags": flags, "icp_score": score, "icp_tier": tier}})
+            except Exception:
+                pass
+            # If new → contacted
+            if lead.get("status") == "new":
+                await db.leads.update_one({"id": lead_id}, {"$set": {"status": "contacted", "status_month": leads_service.month_key()}})
+    return {"ok": True}
+
+
+@api.get("/leads/{lead_id}/touches")
+async def leads_touch_list(lead_id: str, _: dict = Depends(current_user)):
+    docs = _clean_list(await db.lead_touches.find({"lead_id": lead_id}, {"_id": 0}).sort("timestamp", -1).to_list(500))
+    return docs
+
+
+@api.post("/leads/merge")
+async def leads_merge(body: LeadMergeIn, user: dict = Depends(current_user)):
+    keep = await db.leads.find_one({"id": body.keep_id}, {"_id": 0})
+    remove = await db.leads.find_one({"id": body.remove_id}, {"_id": 0})
+    if not keep or not remove:
+        raise HTTPException(status_code=404, detail="Lead(s) not found")
+    # Merge non-empty fields from remove into keep (only if keep's field is empty)
+    updates: dict = {}
+    for k in ("contact_name", "contact_email", "contact_phone", "notes"):
+        if not keep.get(k) and remove.get(k):
+            updates[k] = remove[k]
+    if remove.get("notes") and keep.get("notes") and remove["notes"] not in keep["notes"]:
+        updates["notes"] = f"{keep['notes']}\n\n--- merged from {remove['id']} ---\n{remove['notes']}"
+    # Move touches to keep
+    await db.lead_touches.update_many({"lead_id": body.remove_id}, {"$set": {"lead_id": body.keep_id}})
+    if updates:
+        updates["updated_at"] = _now_iso()
+        await db.leads.update_one({"id": body.keep_id}, {"$set": updates})
+    await db.leads.delete_one({"id": body.remove_id})
+    await _log_touch(body.keep_id, "note", f"Merged from {body.remove_id} by {user['name']}", author_id=user["id"])
+    return {"ok": True, "kept": body.keep_id}
+
+
+@api.post("/leads/{lead_id}/ai-draft")
+async def leads_ai_draft(lead_id: str, _: dict = Depends(current_user)):
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        system = await build_active_system_prompt()
+        draft = await ai_service.lead_intro_draft(
+            company=lead["company"], contact_name=lead.get("contact_name") or "",
+            channel=lead.get("channel", "Other"), icp=lead.get("icp_flags") or {},
+            notes=lead.get("notes") or "", system_prompt=system,
+        )
+    except Exception as e:
+        draft = {
+            "subject": f"Quick thought on {lead['company']}",
+            "body": f"Hi {lead.get('contact_name') or 'there'},\n\nI came across {lead['company']} recently — we work with a handful of Mumbai-based brands (Galalite, Intercont+) and think there's a specific angle we could explore for you.\n\nWorth a 20-min chat next week?\n\n— Kritika, Openspace"
+        }
+    return draft
+
+
+@api.post("/leads/{lead_id}/onboarding")
+async def leads_onboarding(lead_id: str, body: LeadOnboardingPatch, user: dict = Depends(manager_only)):
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Not found")
+    onboarding = dict(lead.get("onboarding") or {})
+    for k, v in body.model_dump().items():
+        if v is not None:
+            onboarding[k] = v
+    # Complete flag can also be auto-derived
+    fully = all(onboarding.get(k) for k in ("contract_sent", "contract_signed", "payment_confirmed", "first_brief_scheduled"))
+    if fully:
+        onboarding["complete"] = True
+    updates = {"onboarding": onboarding, "updated_at": _now_iso(), "last_activity_at": _now_iso()}
+    if onboarding.get("complete"):
+        # Handoff: auto-create client + notify Yusuf + Kritika + webhook
+        cli_id = leads_service.normalize_company(lead["company"])[:20] or f"c{uuid.uuid4().hex[:6]}"
+        existing = await db.clients.find_one({"id": cli_id}, {"_id": 1})
+        if not existing:
+            await db.clients.insert_one({
+                "id": cli_id, "name": lead["company"],
+                "color": "#4361EE", "short": lead["company"][:3].upper(),
+                "email": lead.get("contact_email") or "",
+                "voice": f"New client — onboarded from lead {lead_id}. Update voice guide once brief kickoff is done.",
+            })
+        # Notify Yusuf + BD
+        for u in await db.users.find({"$or": [{"is_admin": True}, {"role_key": "clientsvc"}]}, {"_id": 0, "id": 1}).to_list(20):
+            await db.notifications.insert_one({
+                "id": f"n-{uuid.uuid4().hex[:8]}",
+                "title": f"🎉 New client onboarded: {lead['company']}",
+                "subtitle": f"Handoff from lead {lead_id} → client {cli_id}",
+                "time": _now_iso(), "type": "lead", "read": False, "user_id": u["id"],
+            })
+        await _emit_lead_webhook("lead.onboarded", {**lead, "client_id": cli_id})
+    await db.leads.update_one({"id": lead_id}, {"$set": updates})
+    return _clean(await db.leads.find_one({"id": lead_id}, {"_id": 0}))
+
+
+@api.post("/leads/{lead_id}/booking")
+async def leads_booking(lead_id: str, body: Dict[str, Any] = None, user: dict = Depends(current_user)):
+    body = body or {}
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Not found")
+    when = body.get("scheduled_at") or _now_iso()
+    await db.leads.update_one({"id": lead_id}, {"$set": {"status": "call_scheduled", "status_month": leads_service.month_key(), "call_scheduled_at": when, "last_activity_at": _now_iso()}})
+    await _log_touch(lead_id, "meeting", f"Call scheduled for {when}", author_id=user["id"], meta={"scheduled_at": when})
+    await db.notifications.insert_one({
+        "id": f"n-{uuid.uuid4().hex[:8]}",
+        "title": f"📞 Call scheduled: {lead['company']}",
+        "subtitle": f"{when} · owner {lead.get('owner_id')}",
+        "time": _now_iso(), "type": "lead", "read": False, "user_id": lead.get("owner_id") or "u_yusuf",
+    })
+    await _emit_lead_webhook("lead.booking", {**lead, "scheduled_at": when})
+    return _clean(await db.leads.find_one({"id": lead_id}, {"_id": 0}))
+
+
+# ---------- inbound webhook (Make.com / website form / scraper) ----------
+
+@api.post("/webhooks/leads/inbound")
+async def leads_inbound_webhook(body: LeadIn, x_webhook_secret: Optional[str] = Header(None)):
+    """Receive new leads from Make.com or a website form. Requires shared secret."""
+    expected = os.environ.get("LEADS_INBOUND_SECRET", "")
+    if expected and x_webhook_secret != expected:
+        raise HTTPException(status_code=401, detail="Bad webhook secret")
+    body.source = body.source if body.source in leads_service.SOURCES else "inbound"
+    body.allow_duplicate = False  # dedup surfaces on the wire
+    dupes = await _find_duplicates(body.company, body.contact_email)
+    if dupes:
+        # Log the duplicate rather than reject — flags for review
+        return {"status": "duplicate_flagged", "matches": [{"id": d["id"], "company": d["company"]} for d in dupes]}
+    # Reuse the create logic — cheat by constructing a system user
+    system_user = {"id": "system", "name": "webhook", "is_admin": True}
+    # inline creation
+    icp = leads_service.default_lead_flags()
+    icp.update(body.icp_flags or {})
+    try:
+        system = await build_active_system_prompt()
+        ai_flags = await ai_service.lead_icp_classify(body.company, body.notes, body.channel, system_prompt=system)
+        for k in ("family_run", "startup", "other_b2b", "gap_or_funding"):
+            if k in (ai_flags or {}):
+                icp[k] = bool(ai_flags[k])
+    except Exception:
+        pass
+    score, tier = leads_service.compute_icp_score(icp)
+    owner_id = body.owner_id or await _default_owner_id()
+    lead = {
+        "id": f"lead-{uuid.uuid4().hex[:10]}",
+        "company": body.company.strip(),
+        "dedup_company": leads_service.normalize_company(body.company),
+        "contact_name": body.contact_name or "",
+        "contact_email": (body.contact_email or "").lower().strip(),
+        "email_domain": leads_service.email_domain(body.contact_email),
+        "contact_phone": body.contact_phone or "",
+        "source": body.source,
+        "channel": body.channel,
+        "icp_flags": icp, "icp_score": score, "icp_tier": tier,
+        "status": "new", "status_month": leads_service.month_key(),
+        "owner_id": owner_id,
+        "first_touch_at": _now_iso(), "last_activity_at": _now_iso(),
+        "recycle_date": None,
+        "notes": body.notes or "",
+        "expected_deal_size": float(body.expected_deal_size or 0),
+        "lost_reason": None, "lost_reason_note": "",
+        "onboarding": {"contract_sent": False, "contract_signed": False, "payment_confirmed": False, "first_brief_scheduled": False, "complete": False},
+        "proposal_link": None, "created_at": _now_iso(), "updated_at": _now_iso(),
+    }
+    await db.leads.insert_one({**lead})
+    await _log_touch(lead["id"], "note", f"Lead received via webhook ({body.source} / {body.channel})", author_id="system")
+    await _schedule_nurture(lead)
+    await _emit_lead_webhook("lead.created", lead)
+    return {"status": "created", "id": lead["id"]}
+
+
+# ---------- maintenance: recycle lost, alert stale ----------
+
+@api.post("/leads/maintenance/run")
+async def leads_maintenance(_: dict = Depends(manager_only)):
+    """Idempotent housekeeping — resurface lost leads whose recycle_date has arrived,
+    and post stale-lead alerts for the owner. Safe to call daily via a cron."""
+    today = date.today().isoformat()
+    resurfaced = []
+    async for lead in db.leads.find({"status": "lost", "recycle_date": {"$lte": today}}, {"_id": 0}):
+        await db.leads.update_one({"id": lead["id"]}, {"$set": {"status": "contacted", "status_month": leads_service.month_key(), "recycle_date": None, "last_activity_at": _now_iso()}})
+        await _log_touch(lead["id"], "note", f"Auto-resurfaced from lost — recycle date reached ({today})", author_id="system")
+        await db.notifications.insert_one({
+            "id": f"n-{uuid.uuid4().hex[:8]}", "title": f"🔁 Lead resurfaced: {lead['company']}",
+            "subtitle": "Recycle date reached — worth another shot", "time": _now_iso(),
+            "type": "lead", "read": False, "user_id": lead.get("owner_id") or "u_yusuf",
+        })
+        resurfaced.append(lead["id"])
+    stale = []
+    async for lead in db.leads.find({"status": {"$in": ["contacted", "qualified", "nurturing"]}}, {"_id": 0}):
+        if leads_service.is_stale(lead.get("last_activity_at", ""), lead.get("status", "")):
+            already = await db.notifications.find_one({"type": "lead_stale", "meta.lead_id": lead["id"]})
+            if not already:
+                await db.notifications.insert_one({
+                    "id": f"n-{uuid.uuid4().hex[:8]}", "title": f"⏰ Stale lead: {lead['company']}",
+                    "subtitle": f"No activity for 14+ days — status {lead['status']}",
+                    "time": _now_iso(), "type": "lead_stale", "read": False,
+                    "user_id": lead.get("owner_id") or "u_yusuf",
+                    "meta": {"lead_id": lead["id"]},
+                })
+                stale.append(lead["id"])
+    return {"resurfaced": resurfaced, "stale_alerts": stale}
+
+
+
+# Register the api router LAST so all endpoints defined above are included
+app.include_router(api)

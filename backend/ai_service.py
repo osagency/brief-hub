@@ -403,3 +403,52 @@ async def idle_suggestions(name: str, role_label: str, role_skills: str, festiva
     )
     raw = await chat_once(f"idle-{name}", prompt, system=system_prompt)
     return _extract_json(raw)
+
+
+LEAD_INTRO_PROMPT = """You're writing a cold outbound intro email for Openspace Agency (Mumbai-based marketing agency for family-run businesses, cinema-tech brands, startups). Yusuf (founder) and Kritika (BD) reach out with warmth and specificity, not generic-agency-fluff.
+
+Lead:
+- Company: {company}
+- Contact: {contact_name}
+- Channel: {channel}
+- ICP flags: {icp}
+- Notes: {notes}
+
+Write a 5–7 line email that:
+- Opens with ONE specific observation about their business (from the notes, or a plausible-sounding one if notes are thin)
+- Positions Openspace as tailored, not template-y (mention that we work with family-run / cinema-tech brands like Galalite, Intercont+)
+- Ends with ONE low-friction ask ("worth a 20-min chat next week?")
+- Signs off as: "— Kritika, Openspace"
+
+Return ONLY JSON:
+{{"subject": "...", "body": "..."}}
+
+No markdown fences."""
+
+
+async def lead_intro_draft(company: str, contact_name: str, channel: str, icp: dict, notes: str, system_prompt: str | None = None) -> dict:
+    icp_str = ", ".join(k for k, v in (icp or {}).items() if v) or "none"
+    prompt = LEAD_INTRO_PROMPT.format(company=company, contact_name=contact_name or "there", channel=channel, icp=icp_str, notes=notes or "(no notes)")
+    return await chat_json(f"lead-intro-{company[:20]}", prompt, system=system_prompt)
+
+
+LEAD_ICP_PROMPT = """Classify this lead's ICP fit for Openspace Agency (marketing agency serving family-run businesses, cinema/tech B2B, and Indian startups).
+
+Company: {company}
+Notes/description: {notes}
+Channel: {channel}
+
+Return ONLY JSON with 4 boolean flags:
+{{"family_run": bool, "startup": bool, "other_b2b": bool, "gap_or_funding": bool}}
+
+- family_run: Does the company appear to be a family/founder-led SMB (not enterprise)?
+- startup: Does it appear to be an early-stage (Seed/Series A) tech startup?
+- other_b2b: Any other B2B fit (services, manufacturing, hospitality-tech)?
+- gap_or_funding: Visible marketing/branding gap OR recent funding/expansion news suggesting they'll need agency support?
+
+Be honest — if you don't know, false. No markdown."""
+
+
+async def lead_icp_classify(company: str, notes: str, channel: str, system_prompt: str | None = None) -> dict:
+    prompt = LEAD_ICP_PROMPT.format(company=company, notes=notes or "", channel=channel)
+    return await chat_json(f"lead-icp-{company[:20]}", prompt, system=system_prompt)
