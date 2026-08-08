@@ -42,6 +42,35 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **Calendar overlay** — festival badges under each date-header day in the client-vs-day grid, colour-tinted cell backgrounds on festival days, an "Upcoming · next 60 days" horizontal strip above the grid, and a click-through popover with description. Added ‹ › month navigation.
 - **AI proactive ideas when idle** — `POST /api/ai/idle-suggestions`. When a team member has no meaningful open jobs on My Day, replace the flat empty state with a purple/pink gradient "Free head-space · use it well" panel. Claude reads their role skills, Openspace's clients (with voice guides), and the next 60 days of festivals, and returns 4 concrete role-matched ideas (each with brand + festival tie-in + one-line rationale). Each idea has a **"Copy to pitch"** action to send to Yusuf. Deterministic fallback if AI errors.
 
+## What's Been Implemented (Feb 2026 — v4 HR & People Ops)
+
+**Team profiles extended** — birthday, work-anniversary/joining, blood group, emergency contact, in-notice-period flag on every user. `PATCH /api/hr/profile/{user_id}` — self or manager (notice-period toggle is manager-only).
+
+**Leaves module** — full flow with rule enforcement:
+- Per-year balances: **PL 7 · CL 7 · SL 7 · Public Holidays 12** (auto once past 3-month probation) + **Comp-Off** grown on grant. `GET /api/hr/leaves/balance`.
+- Leave application form (`POST /api/hr/leaves`) requires type, from/to, reason, **lead person** (must be different user), handover notes.
+- **Enforced rules** — probation block (403), balance check (400), **3+ day leaves need 20+ days advance notice** (400), lead-person required (400), **sandwich rule** (weekends between leaves count) baked into `hr_service.count_leave_days`.
+- Manager approval workflow `POST /api/hr/leaves/{id}/decide` → auto-deducts balance on approval + notifies applicant.
+- Team calendar view of approved leaves `GET /api/hr/leaves/team-calendar` (who's out).
+- Comp-off manual grant `POST /api/hr/leaves/compoff/grant`.
+
+**Handover document** — `POST /api/hr/handover/{user_id}/generate` when notice-period is toggled ON. Auto-populates active jobs (id, title, current status, priority) + client contacts. Editable fields for credentials, brand-assets, key relationships. `PATCH /api/hr/handover/{id}`.
+
+**HR Hub** page (`/hr`) with 7 tabs:
+- **People** — profile cards, upcoming birthdays/anniversaries dashboard (`GET /api/hr/dashboard`), notice-period toggle, handover generate button
+- **Culture** — team activities & 1-hour trainings + monthly/quarterly outings with venue, budget, attendees, checklist. AI-suggest activity endpoint (`POST /api/hr/activities/ai-suggest`)
+- **Announcements** — team-wide broadcasts, manager posts, everyone reads
+- **1:1 & Wellness** — private notes per team member (manager-only), weekly wellness pulse endpoint + team-average trend bars
+- **Policies** — CRUD-editable policies (Leave, WFH, Code of Conduct, Working Hours pre-seeded)
+- **Reimbursements** — expense claims with approval workflow
+- **Salary Vault** — PIN-protected (bcrypt), Yusuf-only, per-employee salary history
+
+**Leaves page** (`/leaves`) — balance cards + team-out widget + application list with in-line approve/reject + application modal with sandwich-days preview + 20-day-notice warning banner.
+
+**Client workload widget** — new `GET /api/clients/{client_id}/workload` returns open count by status, by assignee, total hours, next-5 upcoming due. Rendered inline in the Smart Inbox brief modal (`ClientWorkloadWidget` component) so the team sees existing load before setting a new deadline/priority. Shows "Heavy load" or "Overdue" callouts when relevant.
+
+**Seed additions** — birthdays, joining dates, blood groups on all users · 4 pre-seeded policies · 1 welcome announcement · 2 sample activities · 2 sample outings (monthly + quarterly) with checklists · 2 extra public holidays.
+
 ## Removed / Deferred
 - Invoice section, retainer amounts, monthly revenue — all removed.
 - Real Gmail OAuth — pending user credentials

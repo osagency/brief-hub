@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Inbox, Bell, Briefcase, KanbanSquare,
   Calendar, CheckCircle2, Timer, Users, LineChart, BookOpen,
   BarChart3, Sparkles, Trophy, LogOut, Search, UsersRound, Wand2,
-  Menu, X, Eye, EyeOff, Volume2, VolumeX, ChevronDown
+  Menu, X, Eye, EyeOff, Volume2, VolumeX, ChevronDown, CalendarCheck, HeartHandshake
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import api from "../lib/api";
@@ -40,6 +40,8 @@ const SECTIONS = [
     items: [
       { to: "/kpi", label: "KPI & Performance", icon: LineChart, testid: "nav-kpi" },
       { to: "/team", label: "Manage Team", icon: UsersRound, testid: "nav-team", managerOnly: true },
+      { to: "/leaves", label: "Leaves", icon: CalendarCheck, testid: "nav-leaves" },
+      { to: "/hr", label: "HR & Culture", icon: HeartHandshake, testid: "nav-hr" },
       { to: "/sop", label: "SOP Library", icon: BookOpen, testid: "nav-sop" },
     ],
   },

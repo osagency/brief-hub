@@ -3,9 +3,9 @@ import os
 import re
 import uuid
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import bcrypt
 import jwt
@@ -19,6 +19,7 @@ from pydantic import BaseModel, EmailStr, Field
 import seed_data
 import ai_service
 import storage_service
+import hr_service
 
 
 ROOT_DIR = Path(__file__).parent
@@ -306,6 +307,114 @@ class FestivalPatch(BaseModel):
     date: Optional[str] = None
     type: Optional[str] = None
     description: Optional[str] = None
+
+
+# ---------- HR models ----------
+
+class UserHRPatch(BaseModel):
+    birthday: Optional[str] = None
+    joining_date: Optional[str] = None
+    blood_group: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    in_notice_period: Optional[bool] = None
+    notice_start: Optional[str] = None
+
+
+class LeaveApplicationIn(BaseModel):
+    type: str  # PL | CL | SL | CO
+    from_date: str
+    to_date: str
+    reason: str = Field(min_length=1, max_length=500)
+    lead_person_id: str
+    handover_notes: str = Field(min_length=1, max_length=2000)
+
+
+class LeaveDecision(BaseModel):
+    decision: str  # approved | rejected
+    note: str = ""
+
+
+class CompOffGrant(BaseModel):
+    user_id: str
+    days: float
+    reason: str = ""
+
+
+class AnnouncementIn(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=4000)
+    expires_at: Optional[str] = None
+
+
+class PolicyIn(BaseModel):
+    section: str = Field(min_length=1, max_length=40)
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=8000)
+
+
+class PolicyPatch(BaseModel):
+    section: Optional[str] = None
+    title: Optional[str] = None
+    body: Optional[str] = None
+
+
+class TeamActivityIn(BaseModel):
+    title: str = Field(min_length=1, max_length=140)
+    kind: str = "activity"  # training | activity
+    date: str
+    description: str = ""
+    attendees: List[str] = []
+
+
+class OutingIn(BaseModel):
+    title: str = Field(min_length=1, max_length=140)
+    kind: str = "monthly"  # monthly | quarterly
+    date: str
+    venue: str = ""
+    budget: float = 0
+    attendees: List[str] = []
+    notes: str = ""
+    checklist: List[Dict[str, Any]] = []
+
+
+class OneOnOneIn(BaseModel):
+    member_id: str
+    date: str
+    agenda: str = ""
+    notes: str = ""
+    action_items: List[Dict[str, Any]] = []
+
+
+class ReimbursementIn(BaseModel):
+    amount: float
+    category: str = "other"
+    date: str
+    description: str = Field(min_length=1, max_length=500)
+    attachment_url: Optional[str] = None
+
+
+class WellnessPulseIn(BaseModel):
+    energy_score: int = Field(ge=1, le=5)
+    note: str = ""
+
+
+class VaultPinSet(BaseModel):
+    new_pin: str = Field(min_length=4, max_length=20)
+    current_pin: Optional[str] = None
+
+
+class VaultUnlock(BaseModel):
+    pin: str
+
+
+class SalaryIn(BaseModel):
+    user_id: str
+    amount: float
+    currency: str = "INR"
+    effective_from: str
+    note: str = ""
+    pin: str  # required to write
 
 
 # ---------- auth ----------
@@ -1208,6 +1317,586 @@ async def ai_idle_suggestions(user: dict = Depends(current_user)):
             "why": "AI is warming up — here's a safe starter idea. Refresh to get fresh AI-generated suggestions.",
         }]
     return {"ideas": ideas, "upcoming_festivals": fests[:8]}
+
+
+# ---------- clients workload (for job creation UX) ----------
+
+@api.get("/clients/{client_id}/workload")
+async def client_workload(client_id: str, user: dict = Depends(current_user)):
+    """Snapshot of a client's active work — used in the job creation form so the
+    team can set realistic deadlines/priority given current load."""
+    if not await db.clients.find_one({"id": client_id}, {"_id": 1}):
+        raise HTTPException(status_code=404, detail="Client not found")
+    open_statuses = ["active", "todo", "review", "overdue"]
+    jobs = _clean_list(await db.jobs.find({"client": client_id, "status": {"$in": open_statuses}}, {"_id": 0}).sort("due", 1).to_list(50))
+    by_status = {s: 0 for s in open_statuses}
+    by_assignee: dict[str, int] = {}
+    total_hours = 0.0
+    for j in jobs:
+        by_status[j["status"]] = by_status.get(j["status"], 0) + 1
+        total_hours += float(j.get("hours") or 0)
+        for a in (j.get("assignees") or []):
+            by_assignee[a] = by_assignee.get(a, 0) + 1
+    # Recent 5 upcoming due dates
+    upcoming = [{"id": j["id"], "title": j["title"], "due": j.get("due"), "status": j["status"], "priority": j.get("priority"), "assignees": j.get("assignees", [])} for j in jobs[:5]]
+    return {
+        "client_id": client_id,
+        "total_open": len(jobs),
+        "by_status": by_status,
+        "by_assignee": by_assignee,
+        "total_open_hours": total_hours,
+        "upcoming": upcoming,
+    }
+
+
+# ---------- HR: profile ----------
+
+@api.patch("/hr/profile/{user_id}")
+async def hr_patch_profile(user_id: str, data: UserHRPatch, user: dict = Depends(current_user)):
+    """Users edit their own profile fields; managers can edit anyone. Notice-period
+    toggle is manager-only."""
+    is_self = user["id"] == user_id
+    if not is_self and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Managers only")
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "in_notice_period" in updates and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Only manager can toggle notice period")
+    if "in_notice_period" in updates and updates["in_notice_period"] and "notice_start" not in updates:
+        updates["notice_start"] = _now_iso()
+    if not updates:
+        return {"ok": True}
+    r = await db.users.update_one({"id": user_id}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    doc = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    return _clean(doc)
+
+
+@api.get("/hr/dashboard")
+async def hr_dashboard(_: dict = Depends(manager_only)):
+    """Compact dashboard for Yusuf: upcoming birthdays, anniversaries, notice-period folks."""
+    users = _clean_list(await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(50))
+    today = date.today()
+    horizon = today + timedelta(days=30)
+
+    def upcoming_annual(iso_date: str | None):
+        if not iso_date:
+            return None
+        try:
+            d = datetime.strptime(iso_date, "%Y-%m-%d").date()
+            this_year = d.replace(year=today.year)
+            if this_year < today:
+                this_year = d.replace(year=today.year + 1)
+            days_away = (this_year - today).days
+            return {"date": this_year.isoformat(), "days_away": days_away, "original": iso_date}
+        except Exception:
+            return None
+
+    birthdays, anniversaries, on_notice = [], [], []
+    for u in users:
+        b = upcoming_annual(u.get("birthday"))
+        if b and b["days_away"] <= 30:
+            birthdays.append({"user": {"id": u["id"], "name": u["name"], "role_label": u.get("role_label")}, **b})
+        a = upcoming_annual(u.get("joining_date"))
+        if a and a["days_away"] <= 30:
+            j = datetime.strptime(u["joining_date"], "%Y-%m-%d").date()
+            years = today.year - j.year + (0 if a["days_away"] > 0 else 0)
+            anniversaries.append({"user": {"id": u["id"], "name": u["name"], "role_label": u.get("role_label")}, **a, "years": max(1, years)})
+        if u.get("in_notice_period"):
+            on_notice.append({"id": u["id"], "name": u["name"], "role_label": u.get("role_label"), "notice_start": u.get("notice_start")})
+    birthdays.sort(key=lambda x: x["days_away"])
+    anniversaries.sort(key=lambda x: x["days_away"])
+    return {"upcoming_birthdays": birthdays, "upcoming_anniversaries": anniversaries, "on_notice": on_notice}
+
+
+# ---------- HR: leaves ----------
+
+def _year_holidays_iso(festivals: list, year: int) -> list[str]:
+    out = []
+    for f in festivals:
+        if f.get("type") in ("holiday",) and f.get("date", "").startswith(str(year)):
+            out.append(f["date"])
+    return out
+
+
+async def _get_or_init_balance(user_id: str, year: int) -> dict:
+    doc = await db.leave_balances.find_one({"user_id": user_id, "year": year}, {"_id": 0})
+    if doc:
+        return doc
+    # Compute defaults; only past-probation users start with entitlement
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    eligible = hr_service.is_past_probation(user.get("joining_date", ""))
+    balances = hr_service.default_balances() if eligible else {"PL": 0.0, "CL": 0.0, "SL": 0.0, "PH": 0.0, "CO": 0.0}
+    doc = {
+        "user_id": user_id,
+        "year": year,
+        "balances": balances,
+        "used": {"PL": 0.0, "CL": 0.0, "SL": 0.0, "PH": 0.0, "CO": 0.0},
+        "eligible": eligible,
+    }
+    await db.leave_balances.insert_one({**doc})
+    return doc
+
+
+@api.get("/hr/leaves/balance")
+async def leaves_balance(user_id: Optional[str] = None, user: dict = Depends(current_user)):
+    """Own balance by default; manager can query any user."""
+    target = user_id or user["id"]
+    if target != user["id"] and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Managers only")
+    doc = await _get_or_init_balance(target, hr_service.year_key())
+    return doc
+
+
+@api.post("/hr/leaves")
+async def leaves_apply(body: LeaveApplicationIn, user: dict = Depends(current_user)):
+    """Apply for a leave. Enforces probation, balance, 20-day-advance-notice, sandwich rule."""
+    if body.type not in ("PL", "CL", "SL", "CO"):
+        raise HTTPException(status_code=400, detail="Invalid leave type")
+    if not hr_service.is_past_probation(user.get("joining_date", "")):
+        raise HTTPException(status_code=403, detail="You are still on probation (3 months). Leaves are not available yet.")
+    if not body.lead_person_id or body.lead_person_id == user["id"]:
+        raise HTTPException(status_code=400, detail="Lead person must be a different team member")
+
+    year = hr_service.year_key(body.from_date)
+    bal = await _get_or_init_balance(user["id"], year)
+    festivals = await db.festivals.find({}, {"_id": 0}).to_list(200)
+    holiday_iso = [f["date"] for f in festivals if f.get("type") == "holiday" and f.get("date", "").startswith(str(year))]
+    days = hr_service.count_leave_days(body.from_date, body.to_date, holiday_iso, sandwich=True)
+    if days <= 0:
+        raise HTTPException(status_code=400, detail="Invalid date range")
+
+    # 20-day advance notice for 3+ day leaves
+    today_iso = date.today().isoformat()
+    gap = hr_service.working_days_gap(today_iso, body.from_date)
+    if days >= 3 and gap < 20:
+        raise HTTPException(status_code=400, detail=f"Leaves of 3+ days need 20 days advance notice — you're applying with only {gap} day(s) notice.")
+
+    available = float(bal["balances"].get(body.type, 0)) - float(bal["used"].get(body.type, 0))
+    if days > available:
+        raise HTTPException(status_code=400, detail=f"Insufficient {body.type} balance — need {days} days, have {available}")
+
+    # Ensure lead person exists
+    if not await db.users.find_one({"id": body.lead_person_id}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Lead person not found")
+
+    doc = {
+        "id": f"leave-{uuid.uuid4().hex[:10]}",
+        "user_id": user["id"],
+        "type": body.type,
+        "from_date": body.from_date,
+        "to_date": body.to_date,
+        "days": days,
+        "reason": body.reason,
+        "lead_person_id": body.lead_person_id,
+        "handover_notes": body.handover_notes,
+        "status": "pending",
+        "applied_at": _now_iso(),
+        "decided_at": None,
+        "decided_by": None,
+        "decision_note": "",
+    }
+    await db.leave_applications.insert_one({**doc})
+    # Notify manager
+    admins = await db.users.find({"is_admin": True}, {"_id": 0}).to_list(10)
+    for a in admins:
+        await db.notifications.insert_one({
+            "id": f"n-{uuid.uuid4().hex[:8]}",
+            "title": f"Leave request from {user['name']}",
+            "subtitle": f"{body.type} · {days} day(s) · {body.from_date} → {body.to_date}",
+            "time": _now_iso(), "type": "leave", "read": False, "user_id": a["id"],
+        })
+    return doc
+
+
+@api.get("/hr/leaves")
+async def leaves_list(user_id: Optional[str] = None, status_: Optional[str] = None, user: dict = Depends(current_user)):
+    """Own applications by default; managers see all when no filter."""
+    q: dict = {}
+    if user.get("is_admin"):
+        if user_id:
+            q["user_id"] = user_id
+    else:
+        q["user_id"] = user["id"]
+    if status_:
+        q["status"] = status_
+    docs = _clean_list(await db.leave_applications.find(q, {"_id": 0}).sort("applied_at", -1).to_list(500))
+    return docs
+
+
+@api.get("/hr/leaves/team-calendar")
+async def leaves_team_calendar(user: dict = Depends(current_user)):
+    """Approved leaves visible to whole team — used for 'who's out' overlays."""
+    docs = _clean_list(await db.leave_applications.find({"status": "approved"}, {"_id": 0, "handover_notes": 0}).to_list(1000))
+    return docs
+
+
+@api.post("/hr/leaves/{leave_id}/decide")
+async def leaves_decide(leave_id: str, body: LeaveDecision, _: dict = Depends(manager_only)):
+    if body.decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Invalid decision")
+    doc = await db.leave_applications.find_one({"id": leave_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    if doc["status"] != "pending":
+        raise HTTPException(status_code=409, detail="Already decided")
+    await db.leave_applications.update_one({"id": leave_id}, {"$set": {
+        "status": body.decision, "decision_note": body.note, "decided_at": _now_iso(), "decided_by": _["id"],
+    }})
+    if body.decision == "approved":
+        # Deduct balance
+        year = hr_service.year_key(doc["from_date"])
+        await db.leave_balances.update_one(
+            {"user_id": doc["user_id"], "year": year},
+            {"$inc": {f"used.{doc['type']}": doc["days"]}},
+        )
+    await db.notifications.insert_one({
+        "id": f"n-{uuid.uuid4().hex[:8]}",
+        "title": f"Leave {body.decision}",
+        "subtitle": f"{doc['type']} · {doc['from_date']} → {doc['to_date']}" + (f" · {body.note}" if body.note else ""),
+        "time": _now_iso(), "type": "leave", "read": False, "user_id": doc["user_id"],
+    })
+    updated = await db.leave_applications.find_one({"id": leave_id}, {"_id": 0})
+    return _clean(updated)
+
+
+@api.post("/hr/leaves/compoff/grant")
+async def compoff_grant(body: CompOffGrant, _: dict = Depends(manager_only)):
+    year = hr_service.year_key()
+    await _get_or_init_balance(body.user_id, year)
+    await db.leave_balances.update_one(
+        {"user_id": body.user_id, "year": year},
+        {"$inc": {"balances.CO": float(body.days)}},
+    )
+    await db.notifications.insert_one({
+        "id": f"n-{uuid.uuid4().hex[:8]}",
+        "title": f"Comp-off granted: +{body.days} day(s)",
+        "subtitle": body.reason or "For weekend/holiday work",
+        "time": _now_iso(), "type": "leave", "read": False, "user_id": body.user_id,
+    })
+    return await _get_or_init_balance(body.user_id, year)
+
+
+# ---------- HR: handover doc ----------
+
+@api.post("/hr/handover/{user_id}/generate")
+async def handover_generate(user_id: str, _: dict = Depends(manager_only)):
+    """Generate a handover snapshot for a team member (typically on notice-period toggle)."""
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    jobs = _clean_list(await db.jobs.find({"assignees": user_id, "status": {"$in": ["active", "todo", "review", "overdue"]}}).to_list(200))
+    clients_seen = list({j["client"] for j in jobs if j.get("client")})
+    clients = _clean_list(await db.clients.find({"id": {"$in": clients_seen}}, {"_id": 0}).to_list(50))
+
+    active_jobs = [{
+        "job_id": j["id"], "title": j["title"], "client": j.get("client"),
+        "current_status": j["status"], "priority": j.get("priority"),
+        "hours_spent": j.get("hours", 0), "next_steps": "", "reassign_to": "",
+    } for j in jobs]
+
+    doc = {
+        "id": f"handover-{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "user_name": u["name"],
+        "role_label": u.get("role_label"),
+        "generated_at": _now_iso(),
+        "status": "draft",
+        "active_jobs": active_jobs,
+        "client_contacts": [{"id": c["id"], "name": c["name"], "email": c.get("email"), "notes": ""} for c in clients],
+        "credentials_location": "",
+        "brand_assets_location": "",
+        "key_relationships": "",
+        "additional_notes": "",
+    }
+    await db.handovers.replace_one({"user_id": user_id, "status": "draft"}, doc, upsert=True)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/hr/handover/{user_id}")
+async def handover_get(user_id: str, user: dict = Depends(current_user)):
+    if user["id"] != user_id and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    doc = await db.handovers.find_one({"user_id": user_id}, {"_id": 0}, sort=[("generated_at", -1)])
+    if not doc:
+        return None
+    return _clean(doc)
+
+
+@api.patch("/hr/handover/{handover_id}")
+async def handover_patch(handover_id: str, body: Dict[str, Any], user: dict = Depends(current_user)):
+    doc = await db.handovers.find_one({"id": handover_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    if user["id"] != doc["user_id"] and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    allowed = {"active_jobs", "client_contacts", "credentials_location", "brand_assets_location", "key_relationships", "additional_notes", "status"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if updates:
+        await db.handovers.update_one({"id": handover_id}, {"$set": updates})
+    updated = await db.handovers.find_one({"id": handover_id}, {"_id": 0})
+    return _clean(updated)
+
+
+# ---------- HR: announcements, policies, activities, outings, 1:1s, wellness, reimbursements ----------
+
+@api.get("/hr/announcements")
+async def ann_list(_: dict = Depends(current_user)):
+    docs = _clean_list(await db.announcements.find({}, {"_id": 0}).sort("posted_at", -1).to_list(50))
+    return docs
+
+
+@api.post("/hr/announcements")
+async def ann_create(body: AnnouncementIn, user: dict = Depends(manager_only)):
+    doc = {"id": f"ann-{uuid.uuid4().hex[:8]}", **body.model_dump(), "posted_at": _now_iso(), "posted_by": user["id"]}
+    await db.announcements.insert_one({**doc})
+    return doc
+
+
+@api.delete("/hr/announcements/{ann_id}")
+async def ann_delete(ann_id: str, _: dict = Depends(manager_only)):
+    await db.announcements.delete_one({"id": ann_id})
+    return {"ok": True}
+
+
+@api.get("/hr/policies")
+async def pol_list(_: dict = Depends(current_user)):
+    return _clean_list(await db.policies.find({}, {"_id": 0}).to_list(100))
+
+
+@api.post("/hr/policies")
+async def pol_create(body: PolicyIn, user: dict = Depends(manager_only)):
+    doc = {"id": f"pol-{uuid.uuid4().hex[:8]}", **body.model_dump(), "updated_at": _now_iso(), "updated_by": user["id"]}
+    await db.policies.insert_one({**doc})
+    return doc
+
+
+@api.patch("/hr/policies/{pid}")
+async def pol_patch(pid: str, body: PolicyPatch, user: dict = Depends(manager_only)):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    updates["updated_at"] = _now_iso()
+    updates["updated_by"] = user["id"]
+    r = await db.policies.update_one({"id": pid}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return _clean(await db.policies.find_one({"id": pid}, {"_id": 0}))
+
+
+@api.delete("/hr/policies/{pid}")
+async def pol_delete(pid: str, _: dict = Depends(manager_only)):
+    await db.policies.delete_one({"id": pid})
+    return {"ok": True}
+
+
+@api.get("/hr/activities")
+async def act_list(_: dict = Depends(current_user)):
+    return _clean_list(await db.team_activities.find({}, {"_id": 0}).sort("date", 1).to_list(100))
+
+
+@api.post("/hr/activities")
+async def act_create(body: TeamActivityIn, _: dict = Depends(manager_only)):
+    doc = {"id": f"act-{uuid.uuid4().hex[:8]}", **body.model_dump()}
+    await db.team_activities.insert_one({**doc})
+    return doc
+
+
+@api.delete("/hr/activities/{aid}")
+async def act_delete(aid: str, _: dict = Depends(manager_only)):
+    await db.team_activities.delete_one({"id": aid})
+    return {"ok": True}
+
+
+@api.post("/hr/activities/ai-suggest")
+async def act_ai_suggest(_: dict = Depends(manager_only)):
+    """Suggest a fresh 1-hour team activity or training idea, tailored to the current team."""
+    users = _clean_list(await db.users.find({"is_admin": False}, {"_id": 0, "password_hash": 0}).to_list(20))
+    roles = ", ".join({u.get("role_label", "") for u in users if u.get("role_label")})
+    prompt = f"""Suggest ONE 1-hour team activity idea for an Openspace Agency (5-person Mumbai marketing agency).
+Roles on the team: {roles}. Not necessary to have training every week — sometimes bonding/fun beats a class.
+
+Return ONLY JSON:
+{{"title": "...", "kind": "training|activity", "description": "2-3 sentences on what to do and why"}}"""
+    try:
+        system = await build_active_system_prompt()
+        data = await ai_service.chat_json("act-suggest", prompt, system=system)
+    except Exception:
+        data = {"title": "Design critique jam", "kind": "activity", "description": "Everyone shares one recent piece, group critique for 5 min each, wrap with one takeaway."}
+    return data
+
+
+@api.get("/hr/outings")
+async def out_list(_: dict = Depends(current_user)):
+    return _clean_list(await db.outings.find({}, {"_id": 0}).sort("date", 1).to_list(100))
+
+
+@api.post("/hr/outings")
+async def out_create(body: OutingIn, _: dict = Depends(manager_only)):
+    doc = {"id": f"out-{uuid.uuid4().hex[:8]}", **body.model_dump()}
+    await db.outings.insert_one({**doc})
+    return doc
+
+
+@api.patch("/hr/outings/{oid}")
+async def out_patch(oid: str, body: Dict[str, Any], _: dict = Depends(manager_only)):
+    allowed = {"title", "kind", "date", "venue", "budget", "attendees", "notes", "checklist"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        return {"ok": True}
+    r = await db.outings.update_one({"id": oid}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return _clean(await db.outings.find_one({"id": oid}, {"_id": 0}))
+
+
+@api.delete("/hr/outings/{oid}")
+async def out_delete(oid: str, _: dict = Depends(manager_only)):
+    await db.outings.delete_one({"id": oid})
+    return {"ok": True}
+
+
+@api.get("/hr/one-on-ones/{member_id}")
+async def oto_list(member_id: str, _: dict = Depends(manager_only)):
+    return _clean_list(await db.one_on_ones.find({"member_id": member_id}, {"_id": 0}).sort("date", -1).to_list(100))
+
+
+@api.post("/hr/one-on-ones")
+async def oto_create(body: OneOnOneIn, user: dict = Depends(manager_only)):
+    doc = {"id": f"oto-{uuid.uuid4().hex[:8]}", "manager_id": user["id"], **body.model_dump()}
+    await db.one_on_ones.insert_one({**doc})
+    return doc
+
+
+@api.delete("/hr/one-on-ones/{oid}")
+async def oto_delete(oid: str, _: dict = Depends(manager_only)):
+    await db.one_on_ones.delete_one({"id": oid})
+    return {"ok": True}
+
+
+@api.post("/hr/wellness")
+async def wellness_submit(body: WellnessPulseIn, user: dict = Depends(current_user)):
+    from datetime import date as _date
+    iso_year, iso_week, _ = _date.today().isocalendar()
+    week_key = f"{iso_year}-W{iso_week:02d}"
+    doc = {"id": f"wp-{uuid.uuid4().hex[:8]}", "user_id": user["id"], "week": week_key, "energy_score": body.energy_score, "note": body.note, "submitted_at": _now_iso()}
+    # One pulse per user per week — replace if exists
+    await db.wellness_pulses.replace_one({"user_id": user["id"], "week": week_key}, doc, upsert=True)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/hr/wellness/mine")
+async def wellness_mine(user: dict = Depends(current_user)):
+    return _clean_list(await db.wellness_pulses.find({"user_id": user["id"]}, {"_id": 0}).sort("week", -1).to_list(52))
+
+
+@api.get("/hr/wellness/team")
+async def wellness_team(_: dict = Depends(manager_only)):
+    docs = _clean_list(await db.wellness_pulses.find({}, {"_id": 0}).to_list(200))
+    # Aggregate: weekly avg
+    by_week: dict[str, list[float]] = {}
+    for d in docs:
+        by_week.setdefault(d["week"], []).append(float(d.get("energy_score") or 0))
+    trend = [{"week": w, "avg": round(sum(s) / len(s), 2), "n": len(s)} for w, s in sorted(by_week.items())]
+    return {"trend": trend}
+
+
+@api.post("/hr/reimbursements")
+async def reimb_create(body: ReimbursementIn, user: dict = Depends(current_user)):
+    doc = {"id": f"reim-{uuid.uuid4().hex[:8]}", "user_id": user["id"], **body.model_dump(), "status": "pending", "submitted_at": _now_iso(), "decided_at": None, "decided_by": None, "decision_note": ""}
+    await db.reimbursements.insert_one({**doc})
+    return doc
+
+
+@api.get("/hr/reimbursements")
+async def reimb_list(user: dict = Depends(current_user)):
+    q: dict = {} if user.get("is_admin") else {"user_id": user["id"]}
+    return _clean_list(await db.reimbursements.find(q, {"_id": 0}).sort("submitted_at", -1).to_list(200))
+
+
+@api.post("/hr/reimbursements/{rid}/decide")
+async def reimb_decide(rid: str, body: LeaveDecision, user: dict = Depends(manager_only)):
+    if body.decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Invalid decision")
+    r = await db.reimbursements.update_one({"id": rid, "status": "pending"}, {"$set": {"status": body.decision, "decided_at": _now_iso(), "decided_by": user["id"], "decision_note": body.note}})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found or already decided")
+    return _clean(await db.reimbursements.find_one({"id": rid}, {"_id": 0}))
+
+
+# ---------- HR: salary vault (Yusuf-only, PIN-protected) ----------
+
+def _vault_hash(pin: str) -> str:
+    import bcrypt
+    return bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
+
+
+def _vault_verify(pin: str, hashed: str) -> bool:
+    import bcrypt
+    try:
+        return bcrypt.checkpw(pin.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+@api.get("/hr/vault/status")
+async def vault_status(user: dict = Depends(manager_only)):
+    doc = await db.vault_settings.find_one({"user_id": user["id"]}, {"_id": 0})
+    return {"is_set": bool(doc and doc.get("pin_hash"))}
+
+
+@api.post("/hr/vault/set-pin")
+async def vault_set_pin(body: VaultPinSet, user: dict = Depends(manager_only)):
+    doc = await db.vault_settings.find_one({"user_id": user["id"]})
+    if doc and doc.get("pin_hash"):
+        if not body.current_pin or not _vault_verify(body.current_pin, doc["pin_hash"]):
+            raise HTTPException(status_code=403, detail="Current PIN incorrect")
+    await db.vault_settings.replace_one(
+        {"user_id": user["id"]},
+        {"user_id": user["id"], "pin_hash": _vault_hash(body.new_pin), "updated_at": _now_iso()},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+async def _vault_check(user: dict, pin: str) -> None:
+    doc = await db.vault_settings.find_one({"user_id": user["id"]})
+    if not doc or not _vault_verify(pin, doc.get("pin_hash", "")):
+        raise HTTPException(status_code=403, detail="Vault PIN incorrect")
+
+
+@api.post("/hr/vault/list")
+async def vault_list(body: VaultUnlock, user: dict = Depends(manager_only)):
+    await _vault_check(user, body.pin)
+    docs = _clean_list(await db.salaries.find({}, {"_id": 0}).sort("effective_from", -1).to_list(500))
+    # Latest per user
+    latest: dict[str, dict] = {}
+    for d in docs:
+        if d["user_id"] not in latest:
+            latest[d["user_id"]] = d
+    users = _clean_list(await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(50))
+    for u in users:
+        u["_latest_salary"] = latest.get(u["id"])
+    return {"users": users, "history": docs}
+
+
+@api.post("/hr/vault/salary")
+async def vault_salary_set(body: SalaryIn, user: dict = Depends(manager_only)):
+    await _vault_check(user, body.pin)
+    doc = {
+        "id": f"sal-{uuid.uuid4().hex[:8]}",
+        "user_id": body.user_id,
+        "amount": body.amount,
+        "currency": body.currency,
+        "effective_from": body.effective_from,
+        "note": body.note,
+        "updated_at": _now_iso(),
+        "updated_by": user["id"],
+    }
+    await db.salaries.insert_one({**doc})
+    return doc
 
 
 # ---------- prompt studio + templates ----------

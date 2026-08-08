@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
 import { Sparkles, Mail, Send, X, AlertTriangle, Users, Loader2 } from "lucide-react";
+import ClientWorkloadWidget from "../components/ClientWorkloadWidget";
 
 const STATUS_TONE = { complete: "bg-emerald-500", partial: "bg-amber-500", insufficient: "bg-red-500" };
 
@@ -99,6 +100,9 @@ function BriefModal({ email, onClose, clients, refresh }) {
               <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-2">Project brief</div>
               <div className="text-sm text-slate-700 leading-relaxed bg-slate-50 rounded-md p-3">{data.briefSummary?.brief}</div>
             </div>
+
+            {/* Client workload snapshot — helps set realistic deadline & priority */}
+            <ClientWorkloadWidget clientId={email.clientId} clientName={client.name} />
 
             {/* Deliverables */}
             {data.briefSummary?.deliverables?.length > 0 && (

@@ -17,12 +17,18 @@ def _days(n: int) -> str:
 
 
 USERS = [
-    {"id": "u_yusuf", "email": "yusuf@osagency.in", "name": "Yusuf", "role_key": "manager", "role_label": "Manager", "is_admin": True, "password_hash": _hash("manager123"), "created_at": _now_iso()},
-    {"id": "u_arjun", "email": "arjun@osagency.in", "name": "Arjun", "role_key": "writer", "role_label": "Writer", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso()},
-    {"id": "u_priya", "email": "priya@osagency.in", "name": "Priya", "role_key": "designer", "role_label": "Designer", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso()},
-    {"id": "u_kavya", "email": "kavya@osagency.in", "name": "Kavya", "role_key": "mktg", "role_label": "Digital Marketing", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso()},
-    {"id": "u_rohan", "email": "rohan@osagency.in", "name": "Rohan", "role_key": "webdev", "role_label": "Web Developer", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso()},
-    {"id": "u_meera", "email": "meera@osagency.in", "name": "Meera", "role_key": "clientsvc", "role_label": "Client Servicing", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso()},
+    {"id": "u_yusuf", "email": "yusuf@osagency.in", "name": "Yusuf", "role_key": "manager", "role_label": "Manager", "is_admin": True, "password_hash": _hash("manager123"), "created_at": _now_iso(),
+     "birthday": "1988-08-14", "joining_date": "2019-06-01", "blood_group": "O+", "emergency_contact_name": "Family", "emergency_contact_phone": "+91 98200 00000", "in_notice_period": False, "notice_start": None},
+    {"id": "u_arjun", "email": "rupali@osagency.in", "name": "Rupali", "role_key": "designer", "role_label": "Designer", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso(),
+     "birthday": "1996-03-22", "joining_date": "2023-08-15", "blood_group": "B+", "emergency_contact_name": "", "emergency_contact_phone": "", "in_notice_period": False, "notice_start": None},
+    {"id": "u_priya", "email": "kalpesh@osagency.in", "name": "Kalpesh", "role_key": "designer", "role_label": "Designer", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso(),
+     "birthday": "1998-11-04", "joining_date": "2022-11-01", "blood_group": "A+", "emergency_contact_name": "", "emergency_contact_phone": "", "in_notice_period": False, "notice_start": None},
+    {"id": "u_kavya", "email": "aayush@osagency.in", "name": "Aayush", "role_key": "designer", "role_label": "Designer", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso(),
+     "birthday": "1994-06-17", "joining_date": "2024-01-08", "blood_group": "O-", "emergency_contact_name": "", "emergency_contact_phone": "", "in_notice_period": False, "notice_start": None},
+    {"id": "u_rohan", "email": "digital@osagency.in", "name": "Ved", "role_key": "mktg", "role_label": "Digital Marketing", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso(),
+     "birthday": "1997-02-28", "joining_date": "2023-04-10", "blood_group": "AB+", "emergency_contact_name": "", "emergency_contact_phone": "", "in_notice_period": False, "notice_start": None},
+    {"id": "u_meera", "email": "bd@osagency.in", "name": "Kritika", "role_key": "clientsvc", "role_label": "Client Servicing", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso(),
+     "birthday": "1999-09-12", "joining_date": "2025-11-20", "blood_group": "A-", "emergency_contact_name": "", "emergency_contact_phone": "", "in_notice_period": False, "notice_start": None},
 ]
 
 CLIENTS = [
@@ -160,6 +166,33 @@ FESTIVALS = [
     {"name": "Republic Day",            "date": "2027-01-26", "type": "holiday",  "description": "National pride content."},
 ]
 
+# Additional declared public holidays (used for leave PH balance)
+PUBLIC_HOLIDAYS_EXTRA = [
+    {"name": "Ambedkar Jayanti (declared)", "date": "2026-04-14", "type": "holiday", "description": "Declared public holiday"},
+    {"name": "May Day (declared)",           "date": "2026-05-01", "type": "holiday", "description": "Declared public holiday"},
+]
+
+POLICIES = [
+    {"id": "pol-leave", "section": "Leave", "title": "Leave Policy", "body": "**Entitlement (post 3-month probation, per calendar year):**\n- Privileged Leave (PL): 7 days\n- Casual Leave (CL): 7 days\n- Sick Leave (SL): 7 days\n- Public Holidays (PH): 12 days\n- Comp-Off (CO): Earned on approval when working weekends/holidays\n\n**Rules:**\n- No leaves during probation.\n- Sandwich rule applies: weekends between leaves count.\n- 3+ day leaves need 20+ days advance notice.\n- Lead-person must be named for all leaves.\n- Manager approval required.", "updated_at": _now_iso(), "updated_by": "u_yusuf"},
+    {"id": "pol-wfh",   "section": "Work",  "title": "Work-From-Home Policy",   "body": "- Team is office-first (Mumbai HQ).\n- WFH allowed with 24-hour notice to Yusuf.\n- Client-facing team must be reachable on Slack/Phone during 10am–7pm IST.", "updated_at": _now_iso(), "updated_by": "u_yusuf"},
+    {"id": "pol-code",  "section": "Culture","title": "Code of Conduct",        "body": "- Respect clients and colleagues at all times.\n- Zero tolerance for harassment.\n- Client information is confidential.\n- Report concerns directly to Yusuf.", "updated_at": _now_iso(), "updated_by": "u_yusuf"},
+    {"id": "pol-hours", "section": "Work",  "title": "Working Hours",           "body": "- 10:00 AM – 7:00 PM, Mon–Fri.\n- 30-min break flexibility.\n- Overtime tracked via Comp-Off.", "updated_at": _now_iso(), "updated_by": "u_yusuf"},
+]
+
+ANNOUNCEMENTS = [
+    {"id": f"ann-{uuid.uuid4().hex[:8]}", "title": "Welcome to the new HR module!", "body": "You can now apply for leaves, view your balances, and see who's out this week. Managers can also share announcements here.", "posted_at": _now_iso(), "posted_by": "u_yusuf", "expires_at": _days(30)},
+]
+
+TEAM_ACTIVITIES = [
+    {"id": f"act-{uuid.uuid4().hex[:8]}", "title": "Content-writing masterclass (60 min)", "kind": "training",   "date": _days(3),  "description": "Group session — how to write hooks that stop the scroll", "attendees": ["u_arjun", "u_priya", "u_kavya", "u_rohan", "u_meera"]},
+    {"id": f"act-{uuid.uuid4().hex[:8]}", "title": "Design critique jam (60 min)",         "kind": "activity",   "date": _days(10), "description": "Everyone shares one recent piece, group critique",           "attendees": ["u_arjun", "u_priya", "u_kavya", "u_rohan", "u_meera"]},
+]
+
+OUTINGS = [
+    {"id": f"out-{uuid.uuid4().hex[:8]}", "title": "Monthly team dinner",     "kind": "monthly",   "date": _days(14), "venue": "TBD",             "budget": 8000,  "attendees": ["u_yusuf", "u_arjun", "u_priya", "u_kavya", "u_rohan", "u_meera"], "notes": "Pick a cuisine everyone likes", "checklist": [{"item": "Confirm date with team", "done": False}, {"item": "Book restaurant", "done": False}, {"item": "Send reminder", "done": False}]},
+    {"id": f"out-{uuid.uuid4().hex[:8]}", "title": "Quarterly team outing",   "kind": "quarterly", "date": _days(45), "venue": "TBD",             "budget": 25000, "attendees": ["u_yusuf", "u_arjun", "u_priya", "u_kavya", "u_rohan", "u_meera"], "notes": "Off-site day", "checklist": [{"item": "Shortlist 3 venues", "done": False}, {"item": "Confirm attendance", "done": False}, {"item": "Book transport", "done": False}]},
+]
+
 
 async def seed_if_empty(db):
     """Seed all collections if they are empty."""
@@ -191,6 +224,14 @@ async def seed_if_empty(db):
         await db.notifications.insert_many([{**n} for n in NOTIFICATIONS])
     if await db.festivals.count_documents({}) == 0:
         docs = []
-        for f in FESTIVALS:
+        for f in FESTIVALS + PUBLIC_HOLIDAYS_EXTRA:
             docs.append({"id": f"fest-{uuid.uuid4().hex[:10]}", **f})
         await db.festivals.insert_many(docs)
+    if await db.policies.count_documents({}) == 0:
+        await db.policies.insert_many([{**p} for p in POLICIES])
+    if await db.announcements.count_documents({}) == 0:
+        await db.announcements.insert_many([{**a} for a in ANNOUNCEMENTS])
+    if await db.team_activities.count_documents({}) == 0:
+        await db.team_activities.insert_many([{**a} for a in TEAM_ACTIVITIES])
+    if await db.outings.count_documents({}) == 0:
+        await db.outings.insert_many([{**o} for o in OUTINGS])

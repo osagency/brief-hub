@@ -53,6 +53,11 @@ async def chat_once(session_id: str, prompt: str, system: str | None = None) -> 
     return await chat.send_message(UserMessage(text=prompt))
 
 
+async def chat_json(session_id: str, prompt: str, system: str | None = None) -> dict:
+    raw = await chat_once(session_id, prompt, system=system)
+    return _extract_json(raw)
+
+
 def _extract_json(text: str) -> dict:
     """Strip markdown fences and parse JSON from an LLM response."""
     t = text.strip()
