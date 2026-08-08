@@ -30,9 +30,14 @@ const SECTIONS = [
     ],
   },
   {
+    label: "Sales & Growth",
+    items: [
+      { to: "/leads", label: "Lead Generation", icon: Rocket, testid: "nav-leads" },
+    ],
+  },
+  {
     label: "Clients",
     items: [
-      { to: "/leads", label: "Leads", icon: Rocket, testid: "nav-leads" },
       { to: "/clients", label: "Clients", icon: Users, testid: "nav-clients" },
     ],
   },

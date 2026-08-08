@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { fmtDate, STATUS_LABEL, ROLE_EMOJI, ROLE_COLOR } from "../lib/constants";
-import { Briefcase, AlertTriangle, Clock, TrendingUp, Sparkles, RefreshCw, Loader2 } from "lucide-react";
+import { Briefcase, AlertTriangle, Clock, TrendingUp, Sparkles, RefreshCw, Loader2, Rocket, ArrowRight } from "lucide-react";
 import JobDetailModal from "../components/JobDetailModal";
 import { useAuth } from "../lib/auth";
+import { Link } from "react-router-dom";
 
 const StatCard = ({ label, value, tone, icon: Icon, testid }) => {
   const tones = {
@@ -99,14 +100,16 @@ export default function Dashboard() {
   const [clients, setClients] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [users, setUsers] = useState([]);
+  const [leadsFunnel, setLeadsFunnel] = useState({ counts: {}, total: 0, value: {} });
   const [selectedJob, setSelectedJob] = useState(null);
 
   useEffect(() => {
     const load = async () => {
-      const [jobsR, clientsR, apprR, usersR] = await Promise.all([
+      const [jobsR, clientsR, apprR, usersR, leadsR] = await Promise.all([
         api.get("/jobs"), api.get("/clients"), api.get("/approvals"), api.get("/users"),
+        api.get("/leads/funnel").catch(() => ({ data: { counts: {}, total: 0, value: {} } })),
       ]);
-      setJobs(jobsR.data); setClients(clientsR.data); setApprovals(apprR.data); setUsers(usersR.data);
+      setJobs(jobsR.data); setClients(clientsR.data); setApprovals(apprR.data); setUsers(usersR.data); setLeadsFunnel(leadsR.data);
     };
     load();
   }, []);
@@ -155,6 +158,26 @@ export default function Dashboard() {
         <StatCard label="Awaiting approval" value={awaiting} tone="orange" icon={Clock} testid="stat-awaiting" />
         <StatCard label="Done this month" value={doneThisMonth} tone="green" icon={TrendingUp} testid="stat-done-month" />
       </div>
+
+      {/* Sales pipeline shortcut */}
+      <Link to="/leads" data-testid="dashboard-leads-card" className="block rounded-[16px] p-5 text-white relative overflow-hidden hover:shadow-lg transition" style={{ background: "linear-gradient(120deg, #059669 0%, #4361EE 100%)" }}>
+        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-30" style={{ background: "radial-gradient(circle, #F59E0B, transparent 70%)" }} />
+        <div className="relative flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center"><Rocket size={20} /></div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2 text-[11px] mono uppercase tracking-widest opacity-90">Sales & Growth · Lead Generation</div>
+            <div className="text-lg font-semibold mt-0.5">Manage your sales pipeline</div>
+            <div className="text-[13px] opacity-90 mt-0.5">
+              {leadsFunnel.total > 0 ? (
+                <>{leadsFunnel.total} leads · {(leadsFunnel.counts.qualified || 0)} qualified · {(leadsFunnel.counts.proposal_sent || 0)} in proposal · {(leadsFunnel.counts.won || 0)} won</>
+              ) : (
+                <>Add your first lead — outbound scraping, inbound website forms, or manual entry. Kanban + funnel + AI intro drafter, all ready.</>
+              )}
+            </div>
+          </div>
+          <ArrowRight size={20} className="opacity-80" />
+        </div>
+      </Link>
 
       {/* Multi-Brand Health */}
       <div className="card-surface p-5" data-testid="brand-health">
