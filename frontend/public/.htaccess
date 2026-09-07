@@ -1,8 +1,29 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
+
+  # Force HTTPS — the API's CORS policy only allows the https:// origin,
+  # so a visitor on http:// would get blocked API calls.
+  # Both conditions guard against redirect loops behind a proxy/CDN.
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+
+  # SPA fallback: serve index.html for any path that is not a real file,
+  # so client-side routes survive a page refresh.
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . /index.html [L]
+</IfModule>
+
+# Content-hashed bundles can be cached indefinitely; index.html must not be.
+<IfModule mod_expires.c>
+  ExpiresActive On
+  <FilesMatch "\.(js|css|woff2?|png|jpg|jpeg|gif|svg|ico)$">
+    ExpiresDefault "access plus 1 year"
+  </FilesMatch>
+  <FilesMatch "\.(html)$">
+    ExpiresDefault "access plus 0 seconds"
+  </FilesMatch>
 </IfModule>
