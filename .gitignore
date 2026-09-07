@@ -63,6 +63,10 @@ chainlit.md
 
 # Data and databases
 agenthub/agents/youtube/db
+emergent_data_dump.json
+
+# Local deployment notes (contain secrets)
+.deploy/
 
 # Archive files and large assets
 **/*.zip
@@ -83,6 +87,7 @@ android-sdk/
 .env
 .env.*
 *.env
+!.env.example
 credentials.json
 *.key
 .credentials
