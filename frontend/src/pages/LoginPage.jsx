@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 
 const HINTS = [
-  { role: "Manager", email: "yusuf@osagency.in", pw: "manager123" },
+  { role: "Manager", email: "osagency6@gmail.com", pw: "manager123" },
   { role: "Writer", email: "arjun@osagency.in", pw: "team123" },
   { role: "Designer", email: "priya@osagency.in", pw: "team123" },
 ];
@@ -12,7 +12,7 @@ const HINTS = [
 export default function LoginPage() {
   const { login, loading } = useAuth();
   const nav = useNavigate();
-  const [email, setEmail] = useState("yusuf@osagency.in");
+  const [email, setEmail] = useState("osagency6@gmail.com");
   const [password, setPassword] = useState("manager123");
   const [error, setError] = useState("");
 
