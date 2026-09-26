@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 7 — end-to-end verification of the new Gmail sync integration in Smart Inbox (backend + frontend). Created /app/backend/tests/test_gmail_inbox.py with 15 tests covering login on the new manager email, 401 guards, /api/inbox/gmail-status shape, /api/inbox/sync happy-path + idempotency (2nd call → new_count=0, updated_count==total_fetched=25), inbox list contains both mock and Gmail-sourced messages, mark-as-read on mock and Gmail emails, parse-brief succeeds on e-1 and returns 404 for unassigned Gmail emails, and clear-samples removes only non-Gmail rows. All 15 tests PASSED. Frontend /inbox verified via Playwright: status pill 'Gmail connected · 25 synced · last sync just now' visible, sync-gmail-btn + clear-samples-btn present, clicking Sync refreshes the list to 25 Gmail rows (each shows 'Unassigned' pill and mail icon), selecting an unassigned Gmail email shows the amber 'Sender not in your client list.' warning and the ai-create-brief button is correctly hidden.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_gmail_inbox.py",
+    "/app/test_reports/pytest/iter7_gmail.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "backend/gmail_service.py + server.py inbox routes look clean, but consider adding a rate-limit / debounce on POST /api/inbox/sync — currently the manager can hammer the Gmail API from the UI (Sync button has no client-side throttle beyond the syncing flag). Not blocking.",
+    "server.py inbox endpoints (~lines 891-985) should probably surface a partial-failure state if Gmail API returns 429/5xx; currently sync errors would 500 out. Consider try/except with structured error response so the frontend can show a red toast instead of the generic error handler.",
+    "Inbox.jsx (line 253) swallows /inbox/gmail-status errors silently by returning configured:false — this is fine, but if Gmail is briefly down after a real config the pill will say 'not connected' instead of 'error'. Low priority."
+  ],
+  "updated_files": ["/app/backend/tests/test_gmail_inbox.py"],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% of Gmail UI flows verified"},
+  "test_credentials": "osagency6@gmail.com / manager123 (new manager email — confirmed logs in and returns is_admin=true).",
+  "seed_data_creation": "During testing, POST /api/inbox/clear-samples was invoked which removed all seeded mock emails (e-1..e-5). After iteration 7, /api/inbox will contain ONLY Gmail-synced rows (25 of them) until the seed re-runs. If a future testing agent needs mock email e-1 for parse-brief regression tests, restart backend on a fresh DB OR re-seed the inbox collection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Manager email is now osagency6@gmail.com (not yusuf@osagency.in). Update any older test files that still use the old email. Existing /app/backend/tests/backend_test.py has hardcoded yusuf@osagency.in in fixtures — those tests may now fail on the login fixture if the migration replaced yusuf's email. Also note: the previous mock emails e-1..e-5 have been cleared by this run's clear-samples test; tests that depend on them will need to re-seed.",
+  "rca of the issue": "N/A — feature verification, no bugs found. Gmail OAuth wiring works: refresh_token in backend/.env authenticates against osagency6@gmail.com mailbox, /api/inbox/sync fetches 25 recent messages, upserts idempotently by messageId (2nd sync returned new_count=0, updated_count=25), client-matching correctly leaves non-client senders with clientId=null which the frontend renders as an 'Unassigned' pill and blocks the AI-brief action."
+}
