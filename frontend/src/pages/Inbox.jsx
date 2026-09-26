@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { toast } from "sonner";
-import { Sparkles, Mail, Send, X, AlertTriangle, Users, Loader2 } from "lucide-react";
+import { Sparkles, Mail, Send, X, AlertTriangle, Users, Loader2, RefreshCw, CheckCircle2, Trash2 } from "lucide-react";
 import ClientWorkloadWidget from "../components/ClientWorkloadWidget";
 
 const STATUS_TONE = { complete: "bg-emerald-500", partial: "bg-amber-500", insufficient: "bg-red-500" };
@@ -86,7 +86,6 @@ function BriefModal({ email, onClose, clients, refresh }) {
               </span>
             </div>
 
-            {/* Primary team */}
             <div>
               <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-2">Primary team</div>
               <div className="flex gap-2 flex-wrap">
@@ -95,16 +94,13 @@ function BriefModal({ email, onClose, clients, refresh }) {
               </div>
             </div>
 
-            {/* Brief */}
             <div>
               <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-2">Project brief</div>
               <div className="text-sm text-slate-700 leading-relaxed bg-slate-50 rounded-md p-3">{data.briefSummary?.brief}</div>
             </div>
 
-            {/* Client workload snapshot — helps set realistic deadline & priority */}
             <ClientWorkloadWidget clientId={email.clientId} clientName={client.name} />
 
-            {/* Deliverables */}
             {data.briefSummary?.deliverables?.length > 0 && (
               <div>
                 <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-2">Deliverables</div>
@@ -114,7 +110,6 @@ function BriefModal({ email, onClose, clients, refresh }) {
               </div>
             )}
 
-            {/* Workload warning */}
             {data.workloadWarning && (
               <div className="bg-amber-50 border border-amber-200 rounded-md p-3 flex gap-2 text-[13px] text-amber-800" data-testid="workload-warning">
                 <AlertTriangle size={14} className="mt-0.5" />
@@ -122,7 +117,6 @@ function BriefModal({ email, onClose, clients, refresh }) {
               </div>
             )}
 
-            {/* Delegation */}
             {data.internalDelegation?.suggestedWorkflow?.length > 0 && (
               <div>
                 <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-2">Delegation plan</div>
@@ -149,7 +143,6 @@ function BriefModal({ email, onClose, clients, refresh }) {
               </div>
             )}
 
-            {/* Missing info */}
             {(data.missingInfo?.length > 0) && (
               <div className="bg-amber-50 border border-amber-200 rounded-md p-4" data-testid="missing-info">
                 <div className="flex items-center gap-2 text-amber-800 font-semibold mb-2 text-sm"><AlertTriangle size={14} /> Missing information detected</div>
@@ -173,7 +166,6 @@ function BriefModal({ email, onClose, clients, refresh }) {
               </div>
             )}
 
-            {/* Red flags */}
             {data.redFlags?.length > 0 && (
               <div className="bg-red-50 border border-red-200 rounded-md p-3 text-[13px] text-red-800">
                 <div className="font-semibold flex items-center gap-1"><AlertTriangle size={14} /> Red flags</div>
@@ -232,17 +224,37 @@ function ReplyPanel({ email, clients, onClose }) {
   );
 }
 
+function timeAgo(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  } catch { return ""; }
+}
+
 export default function Inbox() {
   const [emails, setEmails] = useState([]);
   const [clients, setClients] = useState([]);
   const [sel, setSel] = useState(null);
   const [briefOpen, setBriefOpen] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
-  const [connectOpen, setConnectOpen] = useState(false);
+  const [gmailStatus, setGmailStatus] = useState({ configured: false, last_sync: null, synced_count: 0 });
+  const [syncing, setSyncing] = useState(false);
 
   const load = async () => {
-    const [e, c] = await Promise.all([api.get("/inbox"), api.get("/clients")]);
-    setEmails(e.data); setClients(c.data);
+    const [e, c, g] = await Promise.all([
+      api.get("/inbox"),
+      api.get("/clients"),
+      api.get("/inbox/gmail-status").catch(() => ({ data: { configured: false } })),
+    ]);
+    setEmails(e.data);
+    setClients(c.data);
+    setGmailStatus(g.data);
     if (!sel && e.data.length) setSel(e.data[0]);
   };
   useEffect(() => { load(); }, []);
@@ -252,23 +264,80 @@ export default function Inbox() {
     if (!e.read) { await api.post(`/inbox/${e.id}/read`); load(); }
   };
 
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      const { data } = await api.post("/inbox/sync");
+      if (data.ok === false) {
+        toast.error(data.detail || "Sync returned no messages.");
+      } else {
+        toast.success(`Synced Gmail · ${data.new_count} new · ${data.updated_count} updated`);
+        await load();
+      }
+    } catch (err) {
+      toast.error("Sync failed: " + (err?.response?.data?.detail || err.message));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const clearSamples = async () => {
+    if (!confirm("Remove the seeded sample emails? Real Gmail messages will remain.")) return;
+    try {
+      const { data } = await api.post("/inbox/clear-samples");
+      toast.success(`Removed ${data.removed} sample emails.`);
+      setSel(null);
+      await load();
+    } catch (err) {
+      toast.error("Could not clear samples.");
+    }
+  };
+
+  const selClient = sel ? (clients.find(c => c.id === sel.clientId) || null) : null;
+  const isUnassigned = sel && !selClient;
+
   return (
     <div className="space-y-5" data-testid="inbox-page">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-[11px] uppercase mono tracking-widest text-slate-500">Command</div>
           <h1 className="text-2xl font-semibold text-slate-900 mt-1">Smart Inbox</h1>
+          {gmailStatus.configured && (
+            <div className="text-[11px] mono text-slate-500 mt-1 flex items-center gap-1.5" data-testid="gmail-status">
+              <CheckCircle2 size={11} className="text-emerald-500" />
+              Gmail connected · {gmailStatus.synced_count} synced · last sync {timeAgo(gmailStatus.last_sync) || "never"}
+            </div>
+          )}
         </div>
-        <button onClick={() => setConnectOpen(true)} data-testid="connect-gmail" className="px-3 h-9 rounded-md border border-[#E5E8F0] text-sm hover:bg-slate-50 flex items-center gap-2">
-          <Mail size={14} /> Connect Gmail
-        </button>
+        <div className="flex items-center gap-2">
+          {gmailStatus.configured ? (
+            <>
+              <button onClick={clearSamples} data-testid="clear-samples-btn" className="px-3 h-9 rounded-md border border-[#E5E8F0] text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2" title="Remove seeded demo emails">
+                <Trash2 size={14} /> Clear samples
+              </button>
+              <button onClick={syncNow} disabled={syncing} data-testid="sync-gmail-btn" className="px-3 h-9 rounded-md bg-[#4361EE] text-white text-sm font-semibold hover:bg-[#3651d0] disabled:opacity-50 flex items-center gap-2">
+                {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                {syncing ? "Syncing…" : "Sync Gmail"}
+              </button>
+            </>
+          ) : (
+            <div className="px-3 h-9 rounded-md border border-dashed border-amber-300 bg-amber-50 text-[12px] text-amber-800 flex items-center gap-2">
+              <AlertTriangle size={12} /> Gmail not configured
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-[300px_1fr] gap-4 h-[70vh]">
-        {/* Email list */}
         <div className="card-surface overflow-y-auto" data-testid="inbox-list">
+          {emails.length === 0 && (
+            <div className="p-6 text-sm text-slate-500 text-center">
+              No emails yet. {gmailStatus.configured ? "Hit Sync Gmail to pull your latest." : "Add Gmail credentials to sync."}
+            </div>
+          )}
           {emails.map(e => {
-            const c = clients.find(x => x.id === e.clientId) || {};
+            const c = clients.find(x => x.id === e.clientId);
+            const isReal = e.source === "gmail";
             return (
               <button
                 key={e.id}
@@ -277,20 +346,22 @@ export default function Inbox() {
                 className={`w-full text-left px-4 py-3 border-b border-[#E5E8F0] transition ${sel?.id === e.id ? "bg-slate-50" : ""} ${!e.read ? "bg-[#4361EE]/5" : ""} ${e.jobCreated ? "border-l-4 border-l-emerald-500" : ""}`}
               >
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="mono" style={{ color: c.color }}>{c.name}</span>
-                  <span className="text-slate-400 mono">{e.time}</span>
+                  <span className="mono flex items-center gap-1" style={{ color: c?.color || "#94A3B8" }}>
+                    {isReal && <Mail size={9} />}
+                    {c ? c.name : "Unassigned"}
+                  </span>
+                  <span className="text-slate-400 mono">{timeAgo(e.time) || e.time?.slice(0, 10)}</span>
                 </div>
                 <div className={`text-[13px] mt-1 truncate ${!e.read ? "font-semibold text-slate-900" : "text-slate-700"}`}>{e.subject}</div>
                 <div className="text-[11px] text-slate-500 truncate mt-0.5">{e.preview}</div>
                 <div className="mt-1.5">
-                  {e.jobCreated ? <span className="chip status-done">Job created ✅</span> : <span className="chip priority-medium">Action needed</span>}
+                  {e.jobCreated ? <span className="chip status-done">Job created</span> : <span className="chip priority-medium">Action needed</span>}
                 </div>
               </button>
             );
           })}
         </div>
 
-        {/* Email detail */}
         {sel ? (
           <div className="card-surface p-6 overflow-y-auto flex flex-col" data-testid="inbox-detail">
             <div>
@@ -299,8 +370,8 @@ export default function Inbox() {
                   <div className="text-[11px] mono text-slate-500">From {sel.senderName} · {sel.from}</div>
                   <h2 className="text-lg font-semibold text-slate-900 mt-1">{sel.subject}</h2>
                 </div>
-                <span className="chip" style={{ background: ((clients.find(c => c.id === sel.clientId) || {}).color || "#94A3B8") + "1A", color: (clients.find(c => c.id === sel.clientId) || {}).color }}>
-                  {(clients.find(c => c.id === sel.clientId) || {}).name}
+                <span className="chip" style={{ background: (selClient?.color || "#94A3B8") + "1A", color: selClient?.color || "#94A3B8" }}>
+                  {selClient?.name || "Unassigned"}
                 </span>
               </div>
               <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap max-h-[220px] overflow-y-auto bg-slate-50 rounded-md p-3">{sel.body}</div>
@@ -308,43 +379,38 @@ export default function Inbox() {
 
             <div className="mt-6 border-t border-[#E5E8F0] pt-4">
               <div className="text-[11px] uppercase mono tracking-widest text-slate-500 mb-3">AI Actions</div>
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  onClick={() => setBriefOpen(true)}
-                  data-testid="ai-create-brief"
-                  className="px-4 h-10 rounded-md bg-[#4361EE] text-white text-sm font-semibold hover:bg-[#3651d0] flex items-center gap-2"
-                >
-                  <Sparkles size={14} /> Create brief & delegate
-                </button>
-                <button
-                  onClick={() => setReplyOpen(true)}
-                  data-testid="ai-draft-reply"
-                  className="px-4 h-10 rounded-md border border-[#E5E8F0] text-sm font-medium hover:bg-slate-50 flex items-center gap-2"
-                >
-                  <Mail size={14} /> Draft reply
-                </button>
-              </div>
+              {isUnassigned ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-[13px] text-amber-800 flex items-start gap-2">
+                  <AlertTriangle size={14} className="mt-0.5" />
+                  <div>
+                    <strong>Sender not in your client list.</strong> Add <code className="bg-white px-1 rounded">{sel.from}</code> as a client (or a client on the same domain) in the Clients page, then re-sync — AI Create Brief & Draft Reply will unlock.
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setBriefOpen(true)}
+                    data-testid="ai-create-brief"
+                    className="px-4 h-10 rounded-md bg-[#4361EE] text-white text-sm font-semibold hover:bg-[#3651d0] flex items-center gap-2"
+                  >
+                    <Sparkles size={14} /> Create brief & delegate
+                  </button>
+                  <button
+                    onClick={() => setReplyOpen(true)}
+                    data-testid="ai-draft-reply"
+                    className="px-4 h-10 rounded-md border border-[#E5E8F0] text-sm font-medium hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <Mail size={14} /> Draft reply
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ) : <div className="card-surface flex items-center justify-center text-slate-400">Select an email</div>}
       </div>
 
-      {briefOpen && sel && <BriefModal email={sel} clients={clients} onClose={() => setBriefOpen(false)} refresh={load} />}
-      {replyOpen && sel && <ReplyPanel email={sel} clients={clients} onClose={() => setReplyOpen(false)} />}
-
-      {connectOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setConnectOpen(false)}>
-          <div className="bg-white rounded-[12px] w-full max-w-md p-6 shadow-2xl" onClick={e => e.stopPropagation()} data-testid="gmail-connect-modal">
-            <div className="text-[13px] font-semibold text-slate-900 mb-2">Connect your Gmail</div>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              To pipe real client emails in, we&apos;ll set up Gmail OAuth (Client ID + Secret + Refresh Token from your Google Cloud project). This preview ships with a curated set of representative client emails so you can test the AI brief parser instantly.
-            </p>
-            <div className="flex justify-end mt-4">
-              <button onClick={() => setConnectOpen(false)} className="px-4 h-9 rounded-md bg-slate-900 text-white text-sm">Got it</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {briefOpen && sel && !isUnassigned && <BriefModal email={sel} clients={clients} onClose={() => setBriefOpen(false)} refresh={load} />}
+      {replyOpen && sel && !isUnassigned && <ReplyPanel email={sel} clients={clients} onClose={() => setReplyOpen(false)} />}
     </div>
   );
 }

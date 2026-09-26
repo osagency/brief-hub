@@ -21,6 +21,7 @@ import ai_service
 import storage_service
 import hr_service
 import leads_service
+import gmail_service
 
 
 ROOT_DIR = Path(__file__).parent
@@ -897,8 +898,82 @@ async def list_inbox(_: dict = Depends(manager_only)):
 
 @api.post("/inbox/{email_id}/read")
 async def mark_read(email_id: str, _: dict = Depends(manager_only)):
+    doc = await db.inbox.find_one({"id": email_id}, {"_id": 0, "messageId": 1, "source": 1})
     await db.inbox.update_one({"id": email_id}, {"$set": {"read": True}})
+    if doc and doc.get("source") == "gmail" and doc.get("messageId"):
+        gmail_service.mark_as_read(doc["messageId"])
     return {"ok": True}
+
+
+@api.get("/inbox/gmail-status")
+async def gmail_status(_: dict = Depends(manager_only)):
+    configured = gmail_service.is_configured()
+    last_sync = await db.system_meta.find_one({"key": "gmail_last_sync"}, {"_id": 0})
+    return {
+        "configured": configured,
+        "last_sync": (last_sync or {}).get("value"),
+        "synced_count": await db.inbox.count_documents({"source": "gmail"}),
+    }
+
+
+@api.post("/inbox/sync")
+async def sync_gmail(_: dict = Depends(manager_only)):
+    if not gmail_service.is_configured():
+        raise HTTPException(status_code=400, detail="Gmail is not configured. Add GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN to backend/.env.")
+    messages = gmail_service.fetch_recent_messages(max_results=25)
+    if not messages:
+        return {"ok": False, "detail": "Fetched 0 messages. Refresh token may have expired.", "new_count": 0, "updated_count": 0}
+    clients = await db.clients.find({}, {"_id": 0}).to_list(200)
+    new_count = 0
+    updated_count = 0
+    for m in messages:
+        client_id = gmail_service.match_client(m.get("from", ""), clients)
+        existing = await db.inbox.find_one({"messageId": m["messageId"]}, {"_id": 0, "id": 1, "jobCreated": 1, "linkedJobId": 1, "read": 1})
+        if existing:
+            await db.inbox.update_one({"id": existing["id"]}, {"$set": {
+                "from": m["from"],
+                "senderName": m["senderName"],
+                "subject": m["subject"],
+                "body": m["body"],
+                "preview": m["preview"],
+                "time": m["time"],
+                "clientId": client_id,
+                "source": "gmail",
+                "read": existing.get("read", False) or m["read"],
+            }})
+            updated_count += 1
+        else:
+            new_id = f"gm-{m['messageId'][:12]}"
+            await db.inbox.insert_one({
+                "id": new_id,
+                "messageId": m["messageId"],
+                "threadId": m.get("threadId"),
+                "source": "gmail",
+                "from": m["from"],
+                "senderName": m["senderName"],
+                "clientId": client_id,
+                "subject": m["subject"],
+                "preview": m["preview"],
+                "body": m["body"],
+                "time": m["time"],
+                "read": m["read"],
+                "jobCreated": False,
+                "starred": False,
+            })
+            new_count += 1
+    await db.system_meta.update_one(
+        {"key": "gmail_last_sync"},
+        {"$set": {"key": "gmail_last_sync", "value": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "new_count": new_count, "updated_count": updated_count, "total_fetched": len(messages)}
+
+
+@api.post("/inbox/clear-samples")
+async def clear_inbox_samples(_: dict = Depends(manager_only)):
+    """Remove seeded sample emails once real Gmail sync is active."""
+    result = await db.inbox.delete_many({"source": {"$ne": "gmail"}})
+    return {"ok": True, "removed": result.deleted_count}
 
 
 @api.post("/inbox/parse-brief")
@@ -2154,6 +2229,8 @@ async def startup():
     # One-time migration: ensure every approval has a public_token
     async for doc in db.approvals.find({"public_token": {"$exists": False}}, {"id": 1}):
         await db.approvals.update_one({"id": doc["id"]}, {"$set": {"public_token": uuid.uuid4().hex[:20]}})
+    # One-time migration: sync manager email to the real owner's account
+    await db.users.update_one({"id": "u_yusuf"}, {"$set": {"email": "osagency6@gmail.com"}})
     try:
         storage_service.init_storage()
     except Exception as e:

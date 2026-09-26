@@ -17,7 +17,7 @@ def _days(n: int) -> str:
 
 
 USERS = [
-    {"id": "u_yusuf", "email": "yusuf@osagency.in", "name": "Yusuf", "role_key": "manager", "role_label": "Manager", "is_admin": True, "password_hash": _hash("manager123"), "created_at": _now_iso(),
+    {"id": "u_yusuf", "email": "osagency6@gmail.com", "name": "Yusuf", "role_key": "manager", "role_label": "Manager", "is_admin": True, "password_hash": _hash("manager123"), "created_at": _now_iso(),
      "birthday": "1988-08-14", "joining_date": "2019-06-01", "blood_group": "O+", "emergency_contact_name": "Family", "emergency_contact_phone": "+91 98200 00000", "in_notice_period": False, "notice_start": None},
     {"id": "u_arjun", "email": "rupali@osagency.in", "name": "Rupali", "role_key": "designer", "role_label": "Designer", "is_admin": False, "password_hash": _hash("team123"), "created_at": _now_iso(),
      "birthday": "1996-03-22", "joining_date": "2023-08-15", "blood_group": "B+", "emergency_contact_name": "", "emergency_contact_phone": "", "in_notice_period": False, "notice_start": None},
