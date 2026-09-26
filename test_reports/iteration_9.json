@@ -1,0 +1,21 @@
+{
+  "summary": "Re-verified login-fix bug per iteration_8 retest request. All 5 acceptance criteria pass. HINTS array on disk is correct (Manager/Designer/Digital) and rendered DOM confirms chips have data-testids demo-manager/demo-designer/demo-digital with emails osagency6@gmail.com, rupali@osagency.in, digital@osagency.in respectively. Default prefill logs in to /dashboard. Designer + Digital chip flows both prefill correct creds and navigate to /dashboard. yusuf@osagency.in/manager123 shows 'Invalid credentials' error. Backend regression: manager 200, yusuf 401, rupali 200, digital 200. Note: The Emergent public preview URL (https://openspace-hub.preview.emergentagent.com) currently serves an emergent.sh 'Not Found' marketing shell for the /login route while localhost:3000 correctly serves the React app — this is an ingress/edge issue unrelated to the app code; I tested via localhost after confirming backend POST /api/auth/login works through the public URL.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py"],
+  "action_items": [
+    "Public preview URL currently returns emergent 'Not Found' page for frontend routes (backend /api/* works fine). Main agent should confirm the preview ingress/deployment for the frontend is healthy before user validation — this is likely an emergent platform routing issue, not app code."
+  ],
+  "critical_code_review_comments": [
+    "LoginPage still hardcodes default useState email/password values for dev convenience — recommend gating behind NODE_ENV !== 'production' or removing before shipping.",
+    "HINTS array is duplicated with backend seed data; drift-prone. Consider a small /api/demo-accounts endpoint or shared manifest."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (4/4 auth checks)", "frontend": "100% (4/4 login flows on localhost)"},
+  "test_credentials": "Manager osagency6@gmail.com/manager123, Designer rupali@osagency.in/team123, Digital digital@osagency.in/team123 — all verified.",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Login bug is fully fixed. If public preview URL is still returning emergent.sh 'Not Found' page, that's an ingress issue — test frontend via http://localhost:3000 as a workaround. Backend /api/* is reachable through public URL just fine.",
+  "rca of the issue": "Not applicable in this iteration — the reported issue from iteration_8 (stale Writer/Designer chip emails) is no longer present. Disk state and DOM both show the corrected HINTS. Iteration_8's failure was likely a hot-reload race where the browser had cached the pre-fix bundle."
+}
