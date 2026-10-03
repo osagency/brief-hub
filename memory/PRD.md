@@ -36,6 +36,15 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **`EmptyState` component** — friendly shared empty state (gradient icon + copy), applied to My Day.
 - **AI Manager Digest** — `GET /api/ai/manager-digest` (admin only). Claude Sonnet 4.5 reads last-7-day aggregate stats (done/overdue/pending approvals/top-loaded person/top client/silent clients/scope flags/@mentions) and writes a 5-bullet Monday briefing with 🔥⚠️🚨✨🎯 markers. Cached in Mongo per ISO week (`manager_digests` collection); Refresh button regenerates. Deterministic fallback if AI errors.
 
+## What's Been Implemented (Feb 2026 — v5 per-user Gmail via Workspace DWD)
+- **Google Workspace Domain-Wide Delegation** replaces the single-user refresh-token Gmail integration. One service account key (stored at `/app/backend/gmail_sa.json`, path via `GMAIL_SA_FILE` env) silently impersonates any `@osagency.in` user — zero per-user OAuth consent.
+- **Per-user inbox scoping**: every inbox doc now carries `owner_email`. `GET /api/inbox`, `POST /api/inbox/sync`, `/parse-brief`, `/draft-reply`, `/create-job`, `/{id}/read` and `/clear-samples` all filter by `current_user.email`. Guard switched from `manager_only` → `current_user`. Each team member only ever sees + syncs their own Gmail.
+- **Workspace guard**: `can_sync_for(email)` enforces that only `@osagency.in` addresses can hit sync. Non-domain users (e.g. the legacy `osagency6@gmail.com`) are blocked at the API layer.
+- **Smart Inbox sidebar link unlocked for all team members** (dropped `managerOnly: true` on nav + route). Inbox unread badge now computed for every role.
+- **Startup migration**: force `u_yusuf.email = yusuf@osagency.in`, delete all pre-DWD Gmail docs, backfill `owner_email = yusuf@osagency.in` on seeded mock emails (so Yusuf sees the demo until he syncs his real Gmail).
+- **LoginPage** defaults + HINTS updated to `yusuf@osagency.in / manager123`.
+- **Awaiting**: user to complete Google Cloud Service Account + Workspace Admin domain-wide delegation setup, then paste the SA JSON — code will light up with zero further changes.
+
 ## What's Been Implemented (Feb 2026 — v4 real Gmail sync)
 - **Gmail OAuth integration in Smart Inbox** — new `gmail_service.py` (google-auth + google-api-python-client). Uses a pre-generated refresh token (via OAuth Playground) stored in `backend/.env` as `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`. Silent access-token refresh, no runtime OAuth flow needed.
 - **New endpoints**: `GET /api/inbox/gmail-status` (configured + last_sync + synced_count), `POST /api/inbox/sync` (pulls last 25 messages, matches sender→client by exact email or domain, upserts idempotently by Gmail messageId), `POST /api/inbox/clear-samples` (removes seeded demo emails once real sync is running). Existing `POST /api/inbox/{id}/read` now also propagates to Gmail for `source=gmail` messages.

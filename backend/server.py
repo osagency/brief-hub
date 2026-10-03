@@ -892,93 +892,95 @@ async def global_search(q: str, user: dict = Depends(current_user)):
 # ---------- inbox ----------
 
 @api.get("/inbox")
-async def list_inbox(_: dict = Depends(manager_only)):
-    return _clean_list(await db.inbox.find({}).sort("time", -1).to_list(200))
+async def list_inbox(user: dict = Depends(current_user)):
+    """Each user sees only their own inbox messages."""
+    return _clean_list(await db.inbox.find({"owner_email": user["email"]}).sort("time", -1).to_list(200))
 
 
 @api.post("/inbox/{email_id}/read")
-async def mark_read(email_id: str, _: dict = Depends(manager_only)):
-    doc = await db.inbox.find_one({"id": email_id}, {"_id": 0, "messageId": 1, "source": 1})
+async def mark_read(email_id: str, user: dict = Depends(current_user)):
+    doc = await db.inbox.find_one({"id": email_id, "owner_email": user["email"]}, {"_id": 0, "messageId": 1, "source": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Email not found")
     await db.inbox.update_one({"id": email_id}, {"$set": {"read": True}})
-    if doc and doc.get("source") == "gmail" and doc.get("messageId"):
-        gmail_service.mark_as_read(doc["messageId"])
+    if doc.get("source") == "gmail" and doc.get("messageId"):
+        gmail_service.mark_as_read(user["email"], doc["messageId"])
     return {"ok": True}
 
 
 @api.get("/inbox/gmail-status")
-async def gmail_status(_: dict = Depends(manager_only)):
-    configured = gmail_service.is_configured()
-    last_sync = await db.system_meta.find_one({"key": "gmail_last_sync"}, {"_id": 0})
+async def gmail_status(user: dict = Depends(current_user)):
+    sa_ok = gmail_service.is_configured()
+    can_sync = gmail_service.can_sync_for(user["email"])
+    last_sync = await db.system_meta.find_one({"key": f"gmail_last_sync:{user['email']}"}, {"_id": 0})
     return {
-        "configured": configured,
+        "configured": can_sync,
+        "sa_present": sa_ok,
+        "user_email": user["email"],
+        "domain_ok": "@" in user["email"] and user["email"].split("@", 1)[1].lower() == gmail_service.WORKSPACE_DOMAIN,
         "last_sync": (last_sync or {}).get("value"),
-        "synced_count": await db.inbox.count_documents({"source": "gmail"}),
+        "synced_count": await db.inbox.count_documents({"source": "gmail", "owner_email": user["email"]}),
     }
 
 
 @api.post("/inbox/sync")
-async def sync_gmail(_: dict = Depends(manager_only)):
+async def sync_gmail(user: dict = Depends(current_user)):
     if not gmail_service.is_configured():
-        raise HTTPException(status_code=400, detail="Gmail is not configured. Add GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN to backend/.env.")
-    messages = gmail_service.fetch_recent_messages(max_results=25)
+        raise HTTPException(status_code=400, detail="Google Workspace service account not configured yet. Ask your admin to upload the SA key.")
+    if not gmail_service.can_sync_for(user["email"]):
+        raise HTTPException(status_code=400, detail=f"Only @{gmail_service.WORKSPACE_DOMAIN} users can sync Gmail via Workspace delegation.")
+    messages = gmail_service.fetch_recent_messages(user_email=user["email"], max_results=25)
     if not messages:
-        return {"ok": False, "detail": "Fetched 0 messages. Refresh token may have expired.", "new_count": 0, "updated_count": 0}
+        raise HTTPException(status_code=502, detail="Fetched 0 messages. Check that domain-wide delegation is granted for this service account + the required scopes.")
     clients = await db.clients.find({}, {"_id": 0}).to_list(200)
     new_count = 0
     updated_count = 0
     for m in messages:
         client_id = gmail_service.match_client(m.get("from", ""), clients)
-        existing = await db.inbox.find_one({"messageId": m["messageId"]}, {"_id": 0, "id": 1, "jobCreated": 1, "linkedJobId": 1, "read": 1})
+        existing = await db.inbox.find_one({"messageId": m["messageId"], "owner_email": user["email"]}, {"_id": 0, "id": 1, "read": 1})
         if existing:
             await db.inbox.update_one({"id": existing["id"]}, {"$set": {
-                "from": m["from"],
-                "senderName": m["senderName"],
-                "subject": m["subject"],
-                "body": m["body"],
-                "preview": m["preview"],
-                "time": m["time"],
-                "clientId": client_id,
+                "from": m["from"], "senderName": m["senderName"],
+                "subject": m["subject"], "body": m["body"], "preview": m["preview"],
+                "time": m["time"], "clientId": client_id,
                 "source": "gmail",
                 "read": existing.get("read", False) or m["read"],
             }})
             updated_count += 1
         else:
-            new_id = f"gm-{m['messageId'][:12]}"
+            new_id = f"gm-{user['id']}-{m['messageId'][:12]}"
             await db.inbox.insert_one({
                 "id": new_id,
                 "messageId": m["messageId"],
                 "threadId": m.get("threadId"),
                 "source": "gmail",
-                "from": m["from"],
-                "senderName": m["senderName"],
+                "owner_email": user["email"],
+                "owner_id": user["id"],
+                "from": m["from"], "senderName": m["senderName"],
                 "clientId": client_id,
-                "subject": m["subject"],
-                "preview": m["preview"],
-                "body": m["body"],
-                "time": m["time"],
-                "read": m["read"],
-                "jobCreated": False,
-                "starred": False,
+                "subject": m["subject"], "preview": m["preview"], "body": m["body"],
+                "time": m["time"], "read": m["read"],
+                "jobCreated": False, "starred": False,
             })
             new_count += 1
     await db.system_meta.update_one(
-        {"key": "gmail_last_sync"},
-        {"$set": {"key": "gmail_last_sync", "value": _now_iso()}},
+        {"key": f"gmail_last_sync:{user['email']}"},
+        {"$set": {"key": f"gmail_last_sync:{user['email']}", "value": _now_iso()}},
         upsert=True,
     )
     return {"ok": True, "new_count": new_count, "updated_count": updated_count, "total_fetched": len(messages)}
 
 
 @api.post("/inbox/clear-samples")
-async def clear_inbox_samples(_: dict = Depends(manager_only)):
-    """Remove seeded sample emails once real Gmail sync is active."""
-    result = await db.inbox.delete_many({"source": {"$ne": "gmail"}})
+async def clear_inbox_samples(user: dict = Depends(current_user)):
+    """Remove seeded sample emails for the current user."""
+    result = await db.inbox.delete_many({"owner_email": user["email"], "source": {"$ne": "gmail"}})
     return {"ok": True, "removed": result.deleted_count}
 
 
 @api.post("/inbox/parse-brief")
-async def parse_brief(body: BriefParseIn, _: dict = Depends(manager_only)):
-    email = await db.inbox.find_one({"id": body.emailId}, {"_id": 0})
+async def parse_brief(body: BriefParseIn, user: dict = Depends(current_user)):
+    email = await db.inbox.find_one({"id": body.emailId, "owner_email": user["email"]}, {"_id": 0})
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     client = await db.clients.find_one({"id": email["clientId"]}, {"_id": 0})
@@ -1015,8 +1017,8 @@ async def parse_brief(body: BriefParseIn, _: dict = Depends(manager_only)):
 
 
 @api.post("/inbox/draft-reply")
-async def draft_reply_api(body: ReplyDraftIn, _: dict = Depends(manager_only)):
-    email = await db.inbox.find_one({"id": body.emailId}, {"_id": 0})
+async def draft_reply_api(body: ReplyDraftIn, user: dict = Depends(current_user)):
+    email = await db.inbox.find_one({"id": body.emailId, "owner_email": user["email"]}, {"_id": 0})
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     client = await db.clients.find_one({"id": email["clientId"]}, {"_id": 0})
@@ -1036,7 +1038,10 @@ async def draft_reply_api(body: ReplyDraftIn, _: dict = Depends(manager_only)):
 
 
 @api.post("/inbox/create-job")
-async def create_job_from_brief(body: CreateJobFromBriefIn, _: dict = Depends(manager_only)):
+async def create_job_from_brief(body: CreateJobFromBriefIn, user: dict = Depends(current_user)):
+    email = await db.inbox.find_one({"id": body.emailId, "owner_email": user["email"]}, {"_id": 0})
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
     brief = body.brief
     delegation = body.delegation
     count = await db.jobs.count_documents({})
@@ -2229,8 +2234,12 @@ async def startup():
     # One-time migration: ensure every approval has a public_token
     async for doc in db.approvals.find({"public_token": {"$exists": False}}, {"id": 1}):
         await db.approvals.update_one({"id": doc["id"]}, {"$set": {"public_token": uuid.uuid4().hex[:20]}})
-    # One-time migration: sync manager email to the real owner's account
-    await db.users.update_one({"id": "u_yusuf"}, {"$set": {"email": "osagency6@gmail.com"}})
+    # Migrate manager email to the true Workspace address
+    await db.users.update_one({"id": "u_yusuf"}, {"$set": {"email": "yusuf@osagency.in"}})
+    # Delete old osagency6-era Gmail docs (previous single-user sync) BEFORE reassigning owners
+    await db.inbox.delete_many({"source": "gmail", "$or": [{"owner_email": {"$exists": False}}, {"owner_email": "osagency6@gmail.com"}]})
+    # Tag any legacy mock inbox docs (missing owner_email) to Yusuf so they still appear for the demo
+    await db.inbox.update_many({"owner_email": {"$exists": False}}, {"$set": {"owner_email": "yusuf@osagency.in"}})
     try:
         storage_service.init_storage()
     except Exception as e:

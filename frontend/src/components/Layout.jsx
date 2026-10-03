@@ -15,7 +15,7 @@ const SECTIONS = [
     label: "Command",
     items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
-      { to: "/inbox", label: "Smart Inbox", icon: Inbox, badge: "inbox", testid: "nav-inbox", managerOnly: true },
+      { to: "/inbox", label: "Smart Inbox", icon: Inbox, badge: "inbox", testid: "nav-inbox" },
       { to: "/notifications", label: "Notifications", icon: Bell, badge: "notif", testid: "nav-notifications" },
     ],
   },
@@ -342,10 +342,8 @@ export default function Layout({ children }) {
         c.activeJobs = jobs.data.filter((j) => ["active", "todo", "review", "overdue"].includes(j.status)).length;
         c.notifUnread = notifs.data.filter((n) => !n.read).length;
         c.approvalsPending = approvals.data.filter((a) => a.status === "pending").length;
-        if (isManager) {
-          const inbox = await api.get("/inbox");
-          c.inboxUnread = inbox.data.filter((e) => !e.read).length;
-        }
+        const inbox = await api.get("/inbox");
+        c.inboxUnread = inbox.data.filter((e) => !e.read).length;
       } catch {}
       setCounts(c);
     };

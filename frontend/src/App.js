@@ -47,7 +47,7 @@ function AppRoutes() {
       <Route path="/client/approval/:token" element={<PublicApproval />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Protected><DashboardOrMyDay /></Protected>} />
-      <Route path="/inbox" element={<Protected managerOnly><Inbox /></Protected>} />
+      <Route path="/inbox" element={<Protected><Inbox /></Protected>} />
       <Route path="/jobs" element={<Protected><Jobs /></Protected>} />
       <Route path="/board" element={<Protected><Board /></Protected>} />
       <Route path="/calendar" element={<Protected><CalendarPage /></Protected>} />
