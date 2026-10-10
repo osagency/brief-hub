@@ -75,7 +75,9 @@ function GlobalSearch() {
         const { data } = await api.get("/search", { params: { q } });
         setResults(data);
         setOpen(true);
-      } catch {}
+      } catch (e) {
+        console.warn("Global search request failed:", e?.message);
+      }
     }, 200);
     return () => clearTimeout(t);
   }, [q]);
@@ -267,7 +269,9 @@ function useNotifPoller() {
             toast(n.title, { description: n.subtitle, icon: "🔔", duration: 6000 });
           }
         });
-      } catch {}
+      } catch (e) {
+        console.warn("Notification poll failed:", e?.message);
+      }
     };
     tick();
     const iv = setInterval(tick, 45000);
@@ -344,7 +348,9 @@ export default function Layout({ children }) {
         c.approvalsPending = approvals.data.filter((a) => a.status === "pending").length;
         const inbox = await api.get("/inbox");
         c.inboxUnread = inbox.data.filter((e) => !e.read).length;
-      } catch {}
+      } catch (e) {
+        console.warn("Badge counts refresh failed:", e?.message);
+      }
       setCounts(c);
     };
     load();
