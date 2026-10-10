@@ -214,7 +214,8 @@ async def seed_if_empty(db):
         await db.sops.insert_many([{**s} for s in SOPS])
     if await db.content_posts.count_documents({}) == 0:
         await db.content_posts.insert_many([{**p} for p in CONTENT_POSTS])
-    if await db.inbox.count_documents({}) == 0:
+    # Re-seed mock inbox emails whenever none exist (survives Gmail sync / clear-samples)
+    if await db.inbox.count_documents({"source": {"$ne": "gmail"}}) == 0:
         await db.inbox.insert_many([{**e} for e in INBOX_EMAILS])
     if await db.approvals.count_documents({}) == 0:
         await db.approvals.insert_many([{**a} for a in APPROVALS])

@@ -36,6 +36,13 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **`EmptyState` component** — friendly shared empty state (gradient icon + copy), applied to My Day.
 - **AI Manager Digest** — `GET /api/ai/manager-digest` (admin only). Claude Sonnet 4.5 reads last-7-day aggregate stats (done/overdue/pending approvals/top-loaded person/top client/silent clients/scope flags/@mentions) and writes a 5-bullet Monday briefing with 🔥⚠️🚨✨🎯 markers. Cached in Mongo per ISO week (`manager_digests` collection); Refresh button regenerates. Deterministic fallback if AI errors.
 
+## What's Been Implemented (Feb 2026 — v5 per-user Gmail via Workspace DWD) — LIVE
+- **Google Workspace Domain-Wide Delegation** is **live and verified**. One service account (`openspace-gmail-sync@openspace-agency-os-509307.iam.gserviceaccount.com`, key at `/app/backend/gmail_sa.json`, path via `GMAIL_SA_FILE` env) impersonates any `@osagency.in` user — zero per-user OAuth consent.
+- **Verified per-user isolation**: Yusuf synced 25 msgs from his inbox (Shikha, Imran, ChatGPT), Rupali synced 25 from hers (Shruti, Ajmal) — **0 messageId overlap**. Full RBAC enforced at API layer; cross-user access returns 404.
+- **Every @osagency.in team member** (Yusuf, Rupali, Kalpesh, Aayush, Ved, Kritika + any future hire added via Manage Team) can now click **Sync Gmail** and pull THEIR own inbox. Non-domain accounts are blocked by `can_sync_for`.
+- **Testing**: iter10 — 15/15 backend + 8/8 frontend (login as 2 different users, independent sync, isolation, mark-as-read-propagation, clear-samples, parse-brief).
+- **Awaiting**: nothing — feature complete.
+
 ## What's Been Implemented (Feb 2026 — v5 per-user Gmail via Workspace DWD)
 - **Google Workspace Domain-Wide Delegation** replaces the single-user refresh-token Gmail integration. One service account key (stored at `/app/backend/gmail_sa.json`, path via `GMAIL_SA_FILE` env) silently impersonates any `@osagency.in` user — zero per-user OAuth consent.
 - **Per-user inbox scoping**: every inbox doc now carries `owner_email`. `GET /api/inbox`, `POST /api/inbox/sync`, `/parse-brief`, `/draft-reply`, `/create-job`, `/{id}/read` and `/clear-samples` all filter by `current_user.email`. Guard switched from `manager_only` → `current_user`. Each team member only ever sees + syncs their own Gmail.
