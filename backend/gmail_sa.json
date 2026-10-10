@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "openspace-agency-os-509307",
+  "private_key_id": "f40d87ed6d24d0315ec6bbc71607d3ccd9000478",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC/POinLtR3q5i4\n1yQawb0+h9lR7Yk6GwX+3pDH9j4rTR6dsT4PrVVoQYL/P29ABoldaFWLkxnBneIu\n2cGovj3nvwyhO03ggNYeS76lDvn+yt7d6rRwOTf7lDHKMpdbFdVBNMVPOQeCTC/T\nWfwlq4FW3zoa66DLjruHGDOXgbt6r6GiAMJ5hTF4kqoKvQwQDCmqA63taXh+Ktn5\neLx7w3xy2K2m08dwSx4eveScaOG5/65FzEjqNzoB1zwfwL2w6vRjW0t18vZQxQ3V\nvZnKEyQ/o469fPkC+EOYeg5E666g1Qd4F/JtI3+SkhbhnrhluDC1wn0H5QxfTwF/\nVivna/nxAgMBAAECggEAAZoKokMbyS+3p+1m09S5wwwiDgVuY4jtUTOIBLkZQ9ba\nbYUlnBrp6pP9huPzfPPLPr2VJu6qejJOsnyq93sHtEBKqj5RGNjSrHdgfTebcMpV\nePyJt3HRyawBWx3T58vxYX6dSqI2X+NevhXjCjcvhZhiIjRQ14xZOQRDDrlBFOqC\nf3dvh3hnAnyMeU9+EYxqpgfH6HhohWaCYBSy7JhfpXZ0M4WAhCEktFX2Z9HsLi5Y\nkAT4EksFx0HkNoLw1B8WNK/UizeA6f/iKZnKYRyiz2PJ2nP8Z7sQ+nzne5Joi4UT\nCWMkkFBet23oCNrDsVRwGQvdzXj7v9Zecy4HCMyx6QKBgQDt0K4wkU5O1iGB2aMl\n2m9WkoNfgnL5M40zKOxLM7ZhCghDQLRuL/s2fkMeyuG4RmnDDJKNVgUg/9h56NSu\nPCzY+JTBHDPx5uIYSauDQSWKr/qbiD4FFtAUdnRJe7WlhXFlm+7ZSnc9WvXmTFMh\nIQVMWYdPLBfXJT07DFVpb8VfewKBgQDN3HY6kX/s54Cmmpp8Unixul06tnQgfl6q\n8uYcusTVMIwkSKq8dxRpsWHWB/vXZ7kaB8DbCxQhnHp4FZFhuMnpJ1h+lZcaGUwd\npFgjmLxI6Gq5LfGOuRoIFIKEiu/FDI7J1pCoRUIfNIV1wuHZXZFo98Ok92rz49x5\nU1ImJCr6gwKBgQCXAzyZeqvPRApi+mCvWNX6k2745007EZFIO2RRHLVjSYuVqTDq\nB23uXJ8inpJXAd+HDCTDuyvmmJBOWZs0SOHxpWhQeChEI+jOo3lWD7hXKQhqW0mG\n0cWwOMf/IZ9nTCWF8E7rjG3LeEdNxonDL8S9htx1WfqJlAwdwuc53M/ooQKBgGhP\npbjXsTKhu5awEEeeonmsLUFq4jz0y5NjsSYtnT9JcjmQeLM2w6kqsKB7OylS7YA7\nHYXgfzrox0XB6ADUWbtCrJy3v/EBkIgUlnSzF/T5j9p1ZUkkkgQ2IEx4+jWmv1OW\n3YXmUjLtshKRxU8XEm9V3FTi6dbbRwRTK/UXro9xAoGAZ3obwLe9Kr0hywGweZPo\n/wg0BcfZPQtpYkn5m2aENU3Zfztj36OLCz1YKw7j5f4sS2fQrpKChALpSdIxB8aI\nVZpIzrowVe8piUiUIW9U7ZcGK56OVGWtyJaXFHfiLNvOhWLMUEAQ0wRm9cPT/LPV\n2+zC25+nINZVdg9RtnyAqx8=\n-----END PRIVATE KEY-----\n",
+  "client_email": "openspace-gmail-sync@openspace-agency-os-509307.iam.gserviceaccount.com",
+  "client_id": "113268634350634633762",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/openspace-gmail-sync%40openspace-agency-os-509307.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
