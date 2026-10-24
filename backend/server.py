@@ -1,6 +1,8 @@
 """Openspace Agency OS — FastAPI backend."""
 import os
 import re
+import hmac
+import asyncio
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
@@ -10,7 +12,7 @@ from typing import Optional, List, Dict, Any
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File, Query, Request
 from fastapi.responses import Response
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -938,9 +940,16 @@ async def sync_gmail(user: dict = Depends(current_user)):
         raise HTTPException(status_code=400, detail="Google Workspace service account not configured yet. Ask your admin to upload the SA key.")
     if not gmail_service.can_sync_for(user["email"]):
         raise HTTPException(status_code=400, detail=f"Only @{gmail_service.WORKSPACE_DOMAIN} users can sync Gmail via Workspace delegation.")
-    messages = gmail_service.fetch_recent_messages(user_email=user["email"], max_results=25)
-    if not messages:
+    result = await _sync_gmail_for(user)
+    if result is None:
         raise HTTPException(status_code=502, detail="Fetched 0 messages. Check that domain-wide delegation is granted for this service account + the required scopes.")
+    return result
+
+
+async def _sync_gmail_for(user: dict) -> Optional[dict]:
+    messages = await asyncio.to_thread(gmail_service.fetch_recent_messages, user_email=user["email"], max_results=25)
+    if not messages:
+        return None
     clients = await db.clients.find({}, {"_id": 0}).to_list(200)
     new_count = 0
     updated_count = 0
@@ -978,6 +987,41 @@ async def sync_gmail(user: dict = Depends(current_user)):
         upsert=True,
     )
     return {"ok": True, "new_count": new_count, "updated_count": updated_count, "total_fetched": len(messages)}
+
+
+async def _sync_all_gmail(run_id: str):
+    users = await db.users.find({}, {"_id": 0, "id": 1, "email": 1}).to_list(500)
+    summary = {}
+    for u in users:
+        if not gmail_service.can_sync_for(u.get("email", "")):
+            continue
+        try:
+            r = await _sync_gmail_for(u)
+            summary[u["id"]] = r["new_count"] if r else 0
+        except Exception as e:
+            logger.warning("Auto Gmail sync failed for %s: %s", u["email"], e)
+            summary[u["id"]] = "error"
+    await db.cron_runs.update_one({"run_id": run_id}, {"$set": {"finished_at": _now_iso(), "summary": summary}})
+
+
+@api.post("/cron/gmail-sync")
+async def cron_gmail_sync(request: Request, authorization: Optional[str] = Header(None), x_webhook_id: Optional[str] = Header(None)):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    secret = os.environ["WEBHOOK_CRON_SECRET"]
+    token = authorization.split(" ", 1)[1] if authorization and authorization.lower().startswith("bearer ") else ""
+    if not token or not hmac.compare_digest(token, secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid body")
+    run_id = x_webhook_id or (body or {}).get("run_id") or uuid.uuid4().hex
+    if await db.cron_runs.find_one({"run_id": run_id}, {"_id": 1}):
+        return {"ok": True, "duplicate": True}
+    await db.cron_runs.insert_one({"run_id": run_id, "name": "gmail-sync", "started_at": _now_iso()})
+    if gmail_service.is_configured():
+        asyncio.create_task(_sync_all_gmail(run_id))
+    return {"ok": True, "accepted": True}
 
 
 @api.post("/inbox/clear-samples")

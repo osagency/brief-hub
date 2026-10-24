@@ -161,6 +161,11 @@ Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_que
 - Deleted 12 demo jobs + 5 TEST_ jobs (and their approvals/timelogs); job/approval/timelog seeding removed; startup `purge_sample_jobs` cleans the same from production on redeploy
 - Job IDs now use max existing number + 1 (no clashes after deletions)
 
+## 2026-10-24 — Smart Inbox auto-sync
+- Platform cron `.emergent/crons.yml` → `POST /api/cron/gmail-sync` every 15 min (prod minimum; user chose 15 over 10)
+- Bearer `WEBHOOK_CRON_SECRET` (backend/.env), idempotent via `cron_runs.run_id`, work runs in background task for every @osagency.in user
+- Known: kalpesh@ and aayush@ return Google "Invalid email or User ID" (no Workspace mailbox) — skipped, others sync
+
 ## Credentials
 See `/app/memory/test_credentials.md`.
 
