@@ -167,10 +167,52 @@ FESTIVALS = [
 ]
 
 # Additional declared public holidays (used for leave PH balance)
-PUBLIC_HOLIDAYS_EXTRA = [
-    {"name": "Ambedkar Jayanti (declared)", "date": "2026-04-14", "type": "holiday", "description": "Declared public holiday"},
-    {"name": "May Day (declared)",           "date": "2026-05-01", "type": "holiday", "description": "Declared public holiday"},
-]
+PUBLIC_HOLIDAYS_EXTRA = []
+
+_DESC = {f["name"]: (f["type"], f["description"]) for f in FESTIVALS}
+_FUTURE_DATES = {
+    "Maha Shivratri": ["2027-03-06", "2028-02-23", "2029-02-11"],
+    "Holi": ["2027-03-22", "2028-03-11", "2029-03-01"],
+    "Ram Navami": ["2027-04-15", "2028-04-03", "2029-03-24"],
+    "Eid-ul-Fitr": ["2027-03-10", "2028-02-26", "2029-02-14"],
+    "Raksha Bandhan": ["2027-08-17", "2028-08-05", "2029-08-23"],
+    "Krishna Janmashtami": ["2027-08-25", "2028-08-13", "2029-09-01"],
+    "Ganesh Chaturthi": ["2027-09-04", "2028-08-23", "2029-09-11"],
+    "Navratri begins": ["2027-09-30", "2028-09-19", "2029-10-08"],
+    "Dussehra": ["2027-10-09", "2028-09-28", "2029-10-16"],
+    "Karva Chauth": ["2027-10-18", "2028-10-07", "2029-10-26"],
+    "Diwali": ["2027-10-29", "2028-10-17", "2029-11-05"],
+    "Guru Nanak Jayanti": ["2027-11-14", "2028-11-02", "2029-11-21"],
+    "Good Friday": ["2027-03-26", "2028-04-14", "2029-03-30"],
+    "Makar Sankranti / Pongal": ["2028-01-15", "2029-01-14"],
+    "Mother's Day": ["2027-05-09", "2028-05-14", "2029-05-13"],
+    "Father's Day": ["2027-06-20", "2028-06-18", "2029-06-17"],
+}
+_FIXED_DATES = {
+    "Valentine's Day": "02-14", "Women's Day": "03-08", "Ambedkar Jayanti": "04-14",
+    "Labour Day": "05-01", "Independence Day": "08-15", "Gandhi Jayanti": "10-02",
+    "Christmas": "12-25", "New Year's Eve": "12-31", "Republic Day": "01-26",
+}
+
+
+def _future_important_dates() -> list:
+    out = [(n, d) for n, ds in _FUTURE_DATES.items() for d in ds]
+    for n, md in _FIXED_DATES.items():
+        years = (2028, 2029) if n == "Republic Day" else (2027, 2028, 2029)
+        out += [(n, f"{y}-{md}") for y in years]
+    return [{"name": n, "date": d, "type": _DESC[n][0], "description": _DESC[n][1]} for n, d in out]
+
+
+async def apply_calendar_updates(db):
+    """Idempotent: drop TEST_ posts and duplicate '(declared)' holidays, add 2027-2029 important dates."""
+    await db.content_posts.delete_many({"topic": {"$regex": "^TEST_"}})
+    await db.festivals.delete_many({"name": {"$regex": r"\(declared\)$"}})
+    for f in _future_important_dates():
+        await db.festivals.update_one(
+            {"name": f["name"], "date": f["date"]},
+            {"$setOnInsert": {"id": f"fest-{uuid.uuid4().hex[:10]}", **f}},
+            upsert=True,
+        )
 
 POLICIES = [
     {"id": "pol-leave", "section": "Leave", "title": "Leave Policy", "body": "**Entitlement (post 3-month probation, per calendar year):**\n- Privileged Leave (PL): 7 days\n- Casual Leave (CL): 7 days\n- Sick Leave (SL): 7 days\n- Public Holidays (PH): 12 days\n- Comp-Off (CO): Earned on approval when working weekends/holidays\n\n**Rules:**\n- No leaves during probation.\n- Sandwich rule applies: weekends between leaves count.\n- 3+ day leaves need 20+ days advance notice.\n- Lead-person must be named for all leaves.\n- Manager approval required.", "updated_at": _now_iso(), "updated_by": "u_yusuf"},

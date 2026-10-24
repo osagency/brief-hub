@@ -166,6 +166,11 @@ Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_que
 - Bearer `WEBHOOK_CRON_SECRET` (backend/.env), idempotent via `cron_runs.run_id`, work runs in background task for every @osagency.in user
 - Known: kalpesh@ and aayush@ return Google "Invalid email or User ID" (no Workspace mailbox) — skipped, others sync
 
+## 2026-10-24 — Content Calendar cleanup & 3-year dates
+- Removed 6 TEST_topic posts and 2 duplicate "(declared)" holidays
+- Added 2027–2029 important dates (festivals, holidays, brand days; 99 total through Dec 2029) via idempotent startup `apply_calendar_updates` (also applies to production on redeploy)
+- Cinema Day (India) not repeated for future years (date varies); Eid dates are moon-sighting estimates
+
 ## Credentials
 See `/app/memory/test_credentials.md`.
 

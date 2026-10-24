@@ -2283,6 +2283,7 @@ app.add_middleware(
 async def startup():
     await seed_data.seed_if_empty(db)
     await seed_data.purge_sample_jobs(db)
+    await seed_data.apply_calendar_updates(db)
     # One-time migration: ensure every approval has a public_token
     async for doc in db.approvals.find({"public_token": {"$exists": False}}, {"id": 1}):
         await db.approvals.update_one({"id": doc["id"]}, {"$set": {"public_token": uuid.uuid4().hex[:20]}})
