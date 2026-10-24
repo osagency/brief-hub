@@ -559,8 +559,15 @@ async def delete_client(client_id: str, _: dict = Depends(manager_only)):
 
 # ---------- jobs ----------
 
+JOB_FULL_ACCESS_EMAILS = {"yusuf@osagency.in", "bd@osagency.in"}
+
+
+def _has_full_job_access(user: dict) -> bool:
+    return bool(user.get("is_admin")) or (user.get("email") or "").lower() in JOB_FULL_ACCESS_EMAILS
+
+
 def _apply_role_filter(query: dict, user: dict) -> dict:
-    if user.get("is_admin"):
+    if _has_full_job_access(user):
         return query
     query["assignees"] = user["id"]
     return query
@@ -570,11 +577,8 @@ def _apply_role_filter(query: dict, user: dict) -> dict:
 async def list_jobs(user: dict = Depends(current_user), assignee: Optional[str] = None):
     q: dict = {}
     q = _apply_role_filter(q, user)
-    if assignee and user.get("is_admin"):
-        if assignee == "yusuf":
-            q["assignees"] = "u_yusuf"
-        else:
-            q["assignees"] = f"u_{assignee}"
+    if assignee and _has_full_job_access(user):
+        q["assignees"] = assignee
     docs = await db.jobs.find(q).sort("createdAt", -1).to_list(500)
     return _clean_list(docs)
 
@@ -2231,6 +2235,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await seed_data.seed_if_empty(db)
+    await seed_data.purge_sample_jobs(db)
     # One-time migration: ensure every approval has a public_token
     async for doc in db.approvals.find({"public_token": {"$exists": False}}, {"id": 1}):
         await db.approvals.update_one({"id": doc["id"]}, {"$set": {"public_token": uuid.uuid4().hex[:20]}})

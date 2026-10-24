@@ -194,20 +194,23 @@ OUTINGS = [
 ]
 
 
+async def purge_sample_jobs(db):
+    """Remove the original demo jobs (exact id+title match) and TEST_ jobs, plus their approvals/timelogs."""
+    sample = [{"id": j["id"], "title": j["title"]} for j in JOBS]
+    docs = await db.jobs.find({"$or": sample + [{"title": {"$regex": "^TEST_"}}]}, {"_id": 0, "id": 1}).to_list(1000)
+    ids = [d["id"] for d in docs]
+    if ids:
+        await db.jobs.delete_many({"id": {"$in": ids}})
+        await db.approvals.delete_many({"jobId": {"$in": ids}})
+        await db.timelogs.delete_many({"jobId": {"$in": ids}})
+
+
 async def seed_if_empty(db):
     """Seed all collections if they are empty."""
     if await db.users.count_documents({}) == 0:
         await db.users.insert_many([{**u} for u in USERS])
     if await db.clients.count_documents({}) == 0:
         await db.clients.insert_many([{**c} for c in CLIENTS])
-    if await db.jobs.count_documents({}) == 0:
-        docs = []
-        for j in JOBS:
-            d = {**j}
-            d["createdAt"] = _now_iso()
-            d["updatedAt"] = _now_iso()
-            docs.append(d)
-        await db.jobs.insert_many(docs)
     if await db.kpi.count_documents({}) == 0:
         await db.kpi.insert_many([{**k} for k in KPI])
     if await db.sops.count_documents({}) == 0:
@@ -217,10 +220,6 @@ async def seed_if_empty(db):
     # Re-seed mock inbox emails whenever none exist (survives Gmail sync / clear-samples)
     if await db.inbox.count_documents({"source": {"$ne": "gmail"}}) == 0:
         await db.inbox.insert_many([{**e} for e in INBOX_EMAILS])
-    if await db.approvals.count_documents({}) == 0:
-        await db.approvals.insert_many([{**a} for a in APPROVALS])
-    if await db.timelogs.count_documents({}) == 0:
-        await db.timelogs.insert_many([{**t} for t in TIMELOGS])
     if await db.notifications.count_documents({}) == 0:
         await db.notifications.insert_many([{**n} for n in NOTIFICATIONS])
     if await db.festivals.count_documents({}) == 0:

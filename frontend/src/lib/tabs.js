@@ -3,6 +3,10 @@ import api from "./api";
 import { useAuth } from "./auth";
 
 export const TAB_OWNER_EMAIL = "yusuf@osagency.in";
+const JOB_FULL_ACCESS_EMAILS = [TAB_OWNER_EMAIL, "bd@osagency.in"];
+
+export const hasFullJobAccess = (user) =>
+  !!user?.is_admin || JOB_FULL_ACCESS_EMAILS.includes((user?.email || "").toLowerCase());
 
 export const TAB_LABELS = {
   inbox: "Smart Inbox", notifications: "Notifications", jobs: "All Jobs", board: "Board",

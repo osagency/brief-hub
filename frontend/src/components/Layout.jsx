@@ -8,7 +8,7 @@ import {
   Menu, X, Eye, EyeOff, Volume2, VolumeX, ChevronDown, CalendarCheck, HeartHandshake, Rocket, SlidersHorizontal
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
-import { useTabs, useIsTabOwner } from "../lib/tabs";
+import { useTabs, useIsTabOwner, hasFullJobAccess } from "../lib/tabs";
 import api from "../lib/api";
 
 const SECTIONS = [
@@ -309,7 +309,7 @@ function Sidebar({ isManager, counts, user, viewAsUser, logout, onNavigate }) {
                   className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
                 >
                   <Icon size={16} />
-                  <span>{it.label}</span>
+                  <span>{it.tab === "jobs" && !hasFullJobAccess(user) ? "Your Jobs" : it.label}</span>
                   <Badge kind={it.badge} counts={counts} />
                 </NavLink>
               );
