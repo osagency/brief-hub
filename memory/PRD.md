@@ -147,6 +147,13 @@ Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_que
 - Chart-heavy KPI history over 6 months
 - Slack integration for standups and deadline pings
 
+## 2026-10-24 — Tab Visibility Manager
+- Default: Time Tracker, Lead Generation, Clients, KPI, Leaves, HR & Culture, AI Assistant, Team Vibes hidden for everyone except yusuf@ and bd@osagency.in
+- New `/tab-visibility` page (Yusuf only, not while impersonating): per-person, per-tab toggles + All/None
+- Hidden tab URLs redirect to /dashboard; empty sidebar sections disappear; View-as reflects member's tabs
+- Backend: `GET /api/settings/tabs/me`, `GET/PUT /api/settings/tabs`; Mongo `settings` doc `tab_visibility.overrides`
+- Known limit: enforced in UI/routes only; underlying data APIs (e.g. /api/clients) still respond
+
 ## Credentials
 See `/app/memory/test_credentials.md`.
 
