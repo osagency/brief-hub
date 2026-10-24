@@ -566,6 +566,12 @@ def _has_full_job_access(user: dict) -> bool:
     return bool(user.get("is_admin")) or (user.get("email") or "").lower() in JOB_FULL_ACCESS_EMAILS
 
 
+async def _next_job_id() -> str:
+    ids = await db.jobs.distinct("id")
+    nums = [int(i[3:]) for i in ids if isinstance(i, str) and i.startswith("OS-") and i[3:].isdigit()]
+    return f"OS-{max(nums, default=0) + 1:03d}"
+
+
 def _apply_role_filter(query: dict, user: dict) -> dict:
     if _has_full_job_access(user):
         return query
@@ -608,8 +614,7 @@ async def patch_job(job_id: str, patch: JobPatch, user: dict = Depends(current_u
 
 @api.post("/jobs")
 async def create_job(data: JobCreate, _: dict = Depends(manager_only)):
-    count = await db.jobs.count_documents({})
-    new_id = f"OS-{count+1:03d}"
+    new_id = await _next_job_id()
     doc = {
         "id": new_id,
         "title": data.title,
@@ -1048,8 +1053,7 @@ async def create_job_from_brief(body: CreateJobFromBriefIn, user: dict = Depends
         raise HTTPException(status_code=404, detail="Email not found")
     brief = body.brief
     delegation = body.delegation
-    count = await db.jobs.count_documents({})
-    new_id = f"OS-{count+1:03d}"
+    new_id = await _next_job_id()
 
     # map assignee roles → user ids
     role_to_uid = {
@@ -2065,8 +2069,7 @@ async def create_job_from_template(body: UseTemplateIn, _: dict = Depends(manage
     tpl = await db.templates.find_one({"id": body.template_id}, {"_id": 0})
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    count = await db.jobs.count_documents({})
-    new_id = f"OS-{count+1:03d}"
+    new_id = await _next_job_id()
     due = body.due or (datetime.now(timezone.utc) + timedelta(days=tpl.get("default_days", 7))).date().isoformat()
     title = body.title or tpl["title_template"] or tpl["name"]
     doc = {

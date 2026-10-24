@@ -1,0 +1,35 @@
+{
+  "summary": "Tested job scoping and the 'Your Jobs' rename on backend and frontend. Backend: 12/12 pytest pass. yusuf and bd see all jobs. Other users only see jobs they are assigned to. The ?assignee filter works only for yusuf/bd; regular members can't use it to see other people's jobs. kalpesh gets 404 on GET and PATCH of OS-018. bd can PATCH OS-018 (the change was saved and then put back). View-as (X-View-As) is scoped correctly. Frontend: the sidebar nav-jobs label and jobs-heading say 'All Jobs' for yusuf/bd and 'Your Jobs' for rupali/kalpesh/aayush/digital. yusuf/bd see 7 pills: Everyone plus real users, with team-filter-<user_id> testids. Filtering by u_arjun, u_priya, u_meera and all works. No old demo names. Non-full users see no pills. Rupali sees OS-018; Kalpesh/Aayush/Ved see an empty list. Board is scoped the same way. yusuf viewing as Rupali sees 'Your Jobs' and OS-018 with no pills; as Kalpesh, an empty list; going back to self restores 'All Jobs' with 7 pills. bd can open the OS-018 modal, which has the status select.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/jobs/{id}", "issue": "There is no endpoint to delete a job. The TEST_ job created during testing had to be removed directly in Mongo (done; only OS-018 remains). A TEST_ job would otherwise only be purged on backend restart."},
+      {"endpoint": "POST /api/jobs", "issue": "The job id is count-based (OS-{count+1}). With only OS-018 present, the next job is OS-002. Once deletions happen, ids can clash with existing ones (e.g. OS-018 again once the count reaches 17), and there is no unique index. Use a max-id or counter sequence instead."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/jobs empty state for non-full users", "issues": ["Kalpesh, Aayush and Ved see 'No jobs match.' even with no filters set. A message like 'No jobs assigned to you yet' would be clearer."]},
+      {"screen": "JobDetailModal (bd, 1920x1080)", "issues": ["The top of the modal appears to sit under the sticky topbar, and the dark backdrop seems to stop partway down the viewport. Minor, and possibly an older issue; not confirmed beyond one screenshot."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_job_scoping.py", "/app/test_reports/pytest/pytest_job_scoping.xml"],
+  "action_items": [
+    "Optional: add DELETE /api/jobs/{id} (manager only), or document that jobs can't be deleted",
+    "Optional: switch job id generation away from count+1 to avoid id clashes",
+    "Optional: show a clearer empty-state message on Your Jobs"
+  ],
+  "critical_code_review_comments": [
+    "server.py: _apply_role_filter also treats any is_admin user as full access. This matches the frontend hasFullJobAccess and is fine.",
+    "server.py: create_job is manager_only, so bd can view and edit all jobs but cannot create them. This matches the request (view and edit).",
+    "TAB_LABELS.jobs in tabs.js is still 'All Jobs'. Only the Tab Visibility admin screen (owner only) uses it, so this is acceptable."
+  ],
+  "updated_files": ["/app/backend/tests/test_job_scoping.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created TEST_scope_job (OS-002, assigned to u_priya) during the pytest run. The test now deletes it through Mongo in a finally block. Verified that only OS-018 remains. OS-018's status was changed and restored to 'active'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run pytest /app/backend/tests/test_job_scoping.py for regression; it cleans up after itself. User ids: u_arjun = rupali, u_priya = kalpesh, u_kavya = aayush, u_rohan = digital (Ved), u_meera = bd (Kritika). OS-018 is the only job."
+}

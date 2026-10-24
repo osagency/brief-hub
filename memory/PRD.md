@@ -154,6 +154,13 @@ Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_que
 - Backend: `GET /api/settings/tabs/me`, `GET/PUT /api/settings/tabs`; Mongo `settings` doc `tab_visibility.overrides`
 - Known limit: enforced in UI/routes only; underlying data APIs (e.g. /api/clients) still respond
 
+## 2026-10-24 — Job scoping & real data
+- "All Jobs" shows as "Your Jobs" for everyone except yusuf@ and bd@osagency.in (sidebar + page heading)
+- Non-full users see only jobs assigned to them; Yusuf and BD view + edit all jobs (`_has_full_job_access`)
+- Jobs filter pills now list real users (by user id) instead of demo names
+- Deleted 12 demo jobs + 5 TEST_ jobs (and their approvals/timelogs); job/approval/timelog seeding removed; startup `purge_sample_jobs` cleans the same from production on redeploy
+- Job IDs now use max existing number + 1 (no clashes after deletions)
+
 ## Credentials
 See `/app/memory/test_credentials.md`.
 
