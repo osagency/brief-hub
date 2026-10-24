@@ -5,9 +5,10 @@ import {
   LayoutDashboard, Inbox, Bell, Briefcase, KanbanSquare,
   Calendar, CheckCircle2, Timer, Users, LineChart, BookOpen,
   BarChart3, Sparkles, Trophy, LogOut, Search, UsersRound, Wand2,
-  Menu, X, Eye, EyeOff, Volume2, VolumeX, ChevronDown, CalendarCheck, HeartHandshake, Rocket
+  Menu, X, Eye, EyeOff, Volume2, VolumeX, ChevronDown, CalendarCheck, HeartHandshake, Rocket, SlidersHorizontal
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import { useTabs, useIsTabOwner } from "../lib/tabs";
 import api from "../lib/api";
 
 const SECTIONS = [
@@ -15,49 +16,50 @@ const SECTIONS = [
     label: "Command",
     items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard" },
-      { to: "/inbox", label: "Smart Inbox", icon: Inbox, badge: "inbox", testid: "nav-inbox" },
-      { to: "/notifications", label: "Notifications", icon: Bell, badge: "notif", testid: "nav-notifications" },
+      { to: "/inbox", label: "Smart Inbox", icon: Inbox, badge: "inbox", testid: "nav-inbox", tab: "inbox" },
+      { to: "/notifications", label: "Notifications", icon: Bell, badge: "notif", testid: "nav-notifications", tab: "notifications" },
     ],
   },
   {
     label: "Work",
     items: [
-      { to: "/jobs", label: "All Jobs", icon: Briefcase, badge: "jobs", testid: "nav-jobs" },
-      { to: "/board", label: "Board", icon: KanbanSquare, testid: "nav-board" },
-      { to: "/calendar", label: "Content Calendar", icon: Calendar, testid: "nav-calendar" },
-      { to: "/approvals", label: "Approvals", icon: CheckCircle2, badge: "approvals", testid: "nav-approvals" },
-      { to: "/time", label: "Time Tracker", icon: Timer, testid: "nav-time" },
+      { to: "/jobs", label: "All Jobs", icon: Briefcase, badge: "jobs", testid: "nav-jobs", tab: "jobs" },
+      { to: "/board", label: "Board", icon: KanbanSquare, testid: "nav-board", tab: "board" },
+      { to: "/calendar", label: "Content Calendar", icon: Calendar, testid: "nav-calendar", tab: "calendar" },
+      { to: "/approvals", label: "Approvals", icon: CheckCircle2, badge: "approvals", testid: "nav-approvals", tab: "approvals" },
+      { to: "/time", label: "Time Tracker", icon: Timer, testid: "nav-time", tab: "time" },
     ],
   },
   {
     label: "Sales & Growth",
     items: [
-      { to: "/leads", label: "Lead Generation", icon: Rocket, testid: "nav-leads" },
+      { to: "/leads", label: "Lead Generation", icon: Rocket, testid: "nav-leads", tab: "leads" },
     ],
   },
   {
     label: "Clients",
     items: [
-      { to: "/clients", label: "Clients", icon: Users, testid: "nav-clients" },
+      { to: "/clients", label: "Clients", icon: Users, testid: "nav-clients", tab: "clients" },
     ],
   },
   {
     label: "Team",
     items: [
-      { to: "/kpi", label: "KPI & Performance", icon: LineChart, testid: "nav-kpi" },
+      { to: "/kpi", label: "KPI & Performance", icon: LineChart, testid: "nav-kpi", tab: "kpi" },
       { to: "/team", label: "Manage Team", icon: UsersRound, testid: "nav-team", managerOnly: true },
-      { to: "/leaves", label: "Leaves", icon: CalendarCheck, testid: "nav-leaves" },
-      { to: "/hr", label: "HR & Culture", icon: HeartHandshake, testid: "nav-hr" },
-      { to: "/sop", label: "SOP Library", icon: BookOpen, testid: "nav-sop" },
+      { to: "/leaves", label: "Leaves", icon: CalendarCheck, testid: "nav-leaves", tab: "leaves" },
+      { to: "/hr", label: "HR & Culture", icon: HeartHandshake, testid: "nav-hr", tab: "hr" },
+      { to: "/sop", label: "SOP Library", icon: BookOpen, testid: "nav-sop", tab: "sop" },
+      { to: "/tab-visibility", label: "Tab Visibility", icon: SlidersHorizontal, testid: "nav-tab-visibility", ownerOnly: true },
     ],
   },
   {
     label: "Intelligence",
     items: [
       { to: "/reports", label: "Reports", icon: BarChart3, testid: "nav-reports", managerOnly: true },
-      { to: "/ai", label: "AI Assistant", icon: Sparkles, testid: "nav-ai" },
+      { to: "/ai", label: "AI Assistant", icon: Sparkles, testid: "nav-ai", tab: "ai" },
       { to: "/prompts", label: "Prompt Studio", icon: Wand2, testid: "nav-prompts", managerOnly: true },
-      { to: "/vibes", label: "Team Vibes", icon: Trophy, testid: "nav-vibes" },
+      { to: "/vibes", label: "Team Vibes", icon: Trophy, testid: "nav-vibes", tab: "vibes" },
     ],
   },
 ];
@@ -280,6 +282,9 @@ function useNotifPoller() {
 }
 
 function Sidebar({ isManager, counts, user, viewAsUser, logout, onNavigate }) {
+  const { hidden } = useTabs();
+  const isOwner = useIsTabOwner();
+  const canSee = (it) => !(it.managerOnly && !isManager) && !(it.ownerOnly && !isOwner) && !(it.tab && hidden.has(it.tab));
   return (
     <aside data-testid="sidebar" className="h-full w-[220px] bg-white border-r border-[#E5E8F0] flex flex-col">
       <div className="h-[54px] flex items-center gap-2 px-4 border-b border-[#E5E8F0]">
@@ -290,11 +295,10 @@ function Sidebar({ isManager, counts, user, viewAsUser, logout, onNavigate }) {
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto px-3 py-2">
-        {SECTIONS.map((sec) => (
+        {SECTIONS.filter(sec => sec.items.some(canSee)).map((sec) => (
           <div key={sec.label}>
             <div className="sidebar-section-label">{sec.label}</div>
-            {sec.items.map((it) => {
-              if (it.managerOnly && !isManager) return null;
+            {sec.items.filter(canSee).map((it) => {
               const Icon = it.icon;
               return (
                 <NavLink

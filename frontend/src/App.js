@@ -25,12 +25,19 @@ import PublicApproval from "./pages/PublicApproval";
 import Leaves from "./pages/Leaves";
 import HRHub from "./pages/HRHub";
 import Leads from "./pages/Leads";
+import TabManager from "./pages/TabManager";
+import { TabsProvider, useTabs, useIsTabOwner } from "./lib/tabs";
 import "./App.css";
 
-function Protected({ children, managerOnly }) {
+function Protected({ children, managerOnly, tab, ownerOnly }) {
   const { user } = useAuth();
+  const { hidden, ready } = useTabs();
+  const isOwner = useIsTabOwner();
   if (!user) return <Navigate to="/login" replace />;
   if (managerOnly && !user.is_admin) return <Navigate to="/dashboard" replace />;
+  if (ownerOnly && !isOwner) return <Navigate to="/dashboard" replace />;
+  if (tab && !ready) return null;
+  if (tab && hidden.has(tab)) return <Navigate to="/dashboard" replace />;
   return <Layout>{children}</Layout>;
 }
 
@@ -47,24 +54,25 @@ function AppRoutes() {
       <Route path="/client/approval/:token" element={<PublicApproval />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Protected><DashboardOrMyDay /></Protected>} />
-      <Route path="/inbox" element={<Protected><Inbox /></Protected>} />
-      <Route path="/jobs" element={<Protected><Jobs /></Protected>} />
-      <Route path="/board" element={<Protected><Board /></Protected>} />
-      <Route path="/calendar" element={<Protected><CalendarPage /></Protected>} />
-      <Route path="/approvals" element={<Protected><Approvals /></Protected>} />
-      <Route path="/time" element={<Protected><TimeTracker /></Protected>} />
-      <Route path="/clients" element={<Protected><Clients /></Protected>} />
+      <Route path="/inbox" element={<Protected tab="inbox"><Inbox /></Protected>} />
+      <Route path="/jobs" element={<Protected tab="jobs"><Jobs /></Protected>} />
+      <Route path="/board" element={<Protected tab="board"><Board /></Protected>} />
+      <Route path="/calendar" element={<Protected tab="calendar"><CalendarPage /></Protected>} />
+      <Route path="/approvals" element={<Protected tab="approvals"><Approvals /></Protected>} />
+      <Route path="/time" element={<Protected tab="time"><TimeTracker /></Protected>} />
+      <Route path="/clients" element={<Protected tab="clients"><Clients /></Protected>} />
       <Route path="/team" element={<Protected managerOnly><Team /></Protected>} />
-      <Route path="/kpi" element={<Protected><KPI /></Protected>} />
-      <Route path="/sop" element={<Protected><SOPs /></Protected>} />
+      <Route path="/kpi" element={<Protected tab="kpi"><KPI /></Protected>} />
+      <Route path="/sop" element={<Protected tab="sop"><SOPs /></Protected>} />
       <Route path="/reports" element={<Protected managerOnly><Reports /></Protected>} />
-      <Route path="/ai" element={<Protected><AIAssistant /></Protected>} />
-      <Route path="/vibes" element={<Protected><Vibes /></Protected>} />
-      <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
+      <Route path="/ai" element={<Protected tab="ai"><AIAssistant /></Protected>} />
+      <Route path="/vibes" element={<Protected tab="vibes"><Vibes /></Protected>} />
+      <Route path="/notifications" element={<Protected tab="notifications"><Notifications /></Protected>} />
       <Route path="/prompts" element={<Protected managerOnly><PromptStudio /></Protected>} />
-      <Route path="/leaves" element={<Protected><Leaves /></Protected>} />
-      <Route path="/hr" element={<Protected><HRHub /></Protected>} />
-      <Route path="/leads" element={<Protected><Leads /></Protected>} />
+      <Route path="/leaves" element={<Protected tab="leaves"><Leaves /></Protected>} />
+      <Route path="/hr" element={<Protected tab="hr"><HRHub /></Protected>} />
+      <Route path="/leads" element={<Protected tab="leads"><Leads /></Protected>} />
+      <Route path="/tab-visibility" element={<Protected ownerOnly><TabManager /></Protected>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
@@ -75,7 +83,9 @@ function App() {
     <div className="App">
       <BrowserRouter>
         <AuthProvider>
-          <AppRoutes />
+          <TabsProvider>
+            <AppRoutes />
+          </TabsProvider>
           <Toaster position="top-right" richColors />
         </AuthProvider>
       </BrowserRouter>

@@ -2833,5 +2833,72 @@ async def leads_maintenance(_: dict = Depends(manager_only)):
 
 
 
+# ---------- tab visibility ----------
+
+TAB_OWNER_EMAIL = "yusuf@osagency.in"
+TAB_KEYS = ["inbox", "notifications", "jobs", "board", "calendar", "approvals", "time",
+            "leads", "clients", "kpi", "leaves", "hr", "sop", "ai", "vibes"]
+DEFAULT_RESTRICTED_TABS = {"time", "leads", "clients", "kpi", "leaves", "hr", "ai", "vibes"}
+DEFAULT_FULL_ACCESS_EMAILS = {TAB_OWNER_EMAIL, "bd@osagency.in"}
+
+
+class TabVisibilityIn(BaseModel):
+    user_id: str
+    visible: Dict[str, bool]
+
+
+async def tab_owner_only(user: dict = Depends(current_user)) -> dict:
+    if user.get("_impersonated_by") or (user.get("email") or "").lower() != TAB_OWNER_EMAIL:
+        raise HTTPException(status_code=403, detail="Only Yusuf can manage tab visibility")
+    return user
+
+
+async def _tab_overrides() -> dict:
+    doc = await db.settings.find_one({"id": "tab_visibility"}, {"_id": 0})
+    return (doc or {}).get("overrides", {})
+
+
+def _visible_tabs(u: dict, overrides: dict) -> Dict[str, bool]:
+    email = (u.get("email") or "").lower()
+    if email == TAB_OWNER_EMAIL:
+        return {k: True for k in TAB_KEYS}
+    full = email in DEFAULT_FULL_ACCESS_EMAILS
+    mine = overrides.get(u["id"], {})
+    return {k: mine.get(k, full or k not in DEFAULT_RESTRICTED_TABS) for k in TAB_KEYS}
+
+
+@api.get("/settings/tabs/me")
+async def my_tab_visibility(user: dict = Depends(current_user)):
+    vis = _visible_tabs(user, await _tab_overrides())
+    return {"hidden": [k for k, v in vis.items() if not v]}
+
+
+@api.get("/settings/tabs")
+async def list_tab_visibility(_: dict = Depends(tab_owner_only)):
+    overrides = await _tab_overrides()
+    users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role_label": 1}).to_list(500)
+    return {
+        "tabs": TAB_KEYS,
+        "users": [{**u, "locked": (u.get("email") or "").lower() == TAB_OWNER_EMAIL,
+                   "visible": _visible_tabs(u, overrides)} for u in users],
+    }
+
+
+@api.put("/settings/tabs")
+async def update_tab_visibility(data: TabVisibilityIn, _: dict = Depends(tab_owner_only)):
+    target = await db.users.find_one({"id": data.user_id}, {"_id": 0, "id": 1, "email": 1})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if (target.get("email") or "").lower() == TAB_OWNER_EMAIL:
+        raise HTTPException(status_code=400, detail="Your own tabs are always visible")
+    clean = {k: bool(v) for k, v in data.visible.items() if k in TAB_KEYS}
+    await db.settings.update_one(
+        {"id": "tab_visibility"},
+        {"$set": {f"overrides.{data.user_id}": clean, "updated_at": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "visible": _visible_tabs(target, {data.user_id: clean})}
+
+
 # Register the api router LAST so all endpoints defined above are included
 app.include_router(api)
