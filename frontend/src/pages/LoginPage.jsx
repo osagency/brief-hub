@@ -5,8 +5,8 @@ import { Sparkles } from "lucide-react";
 
 const HINTS = [
   { role: "Manager", email: "yusuf@osagency.in", pw: "manager123" },
-  { role: "Writer", email: "arjun@osagency.in", pw: "team123" },
-  { role: "Designer", email: "priya@osagency.in", pw: "team123" },
+  { role: "Designer", email: "rupali@osagency.in", pw: "team123" },
+  { role: "Digital", email: "digital@osagency.in", pw: "team123" },
 ];
 
 export default function LoginPage() {

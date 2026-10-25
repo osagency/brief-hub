@@ -19,7 +19,9 @@ function playDing() {
     o.start();
     o.stop(ctx.currentTime + 0.4);
     setTimeout(() => ctx.close(), 500);
-  } catch {}
+  } catch (e) {
+    console.debug("celebrate ding skipped:", e?.message);
+  }
 }
 
 function fireConfetti() {
@@ -54,7 +56,7 @@ export async function celebrateJobDone(jobId, jobTitle) {
     if (data?.line) {
       toast(data.line, { duration: 6000, icon: "👑" });
     }
-  } catch {
-    // silent fallback — the first toast already fired
+  } catch (e) {
+    console.warn("AI celebrate line failed, keeping default toast:", e?.message);
   }
 }

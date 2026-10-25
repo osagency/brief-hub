@@ -21,10 +21,12 @@ export default function Vibes() {
   const [logs, setLogs] = useState([]);
   const [clients, setClients] = useState([]);
   const [qIdx, setQIdx] = useState(0);
+  const [streak, setStreak] = useState({ streak: 0 });
 
   useEffect(() => {
     Promise.all([api.get("/users"), api.get("/kpi", { params: { period: "monthly" } }), api.get("/jobs"), api.get("/timelogs"), api.get("/clients")])
       .then(([u,k,j,l,c]) => { setUsers(u.data); setKpi(k.data); setJobs(j.data); setLogs(l.data); setClients(c.data); });
+    api.get("/kpi/streak").then(r => setStreak(r.data)).catch(() => {});
   }, []);
 
   // Time this week (last 7 days) per user per client

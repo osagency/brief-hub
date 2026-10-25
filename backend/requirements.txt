@@ -15,5 +15,9 @@ requests>=2.31.0
 python-multipart>=0.0.9
 emergentintegrations==0.2.0
 
+# Gmail sync via Google Workspace domain-wide delegation
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+
 # tests
 pytest>=8.0.0
