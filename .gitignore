@@ -84,5 +84,6 @@ android-sdk/
 .env.*
 *.env
 credentials.json
+gmail_sa*.json
 *.key
 .credentials

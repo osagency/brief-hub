@@ -171,6 +171,9 @@ Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_que
 - Added 2027–2029 important dates (festivals, holidays, brand days; 99 total through Dec 2029) via idempotent startup `apply_calendar_updates` (also applies to production on redeploy)
 - Cinema Day (India) not repeated for future years (date varies); Eid dates are moon-sighting estimates
 
+## 2026-10-25 — GitHub push fix
+- Moved Google service-account key from `backend/gmail_sa.json` into `GMAIL_SA_JSON` env secret; file deleted + gitignored. Gmail sync verified working after the change.
+
 ## Credentials
 See `/app/memory/test_credentials.md`.
 
