@@ -3,18 +3,12 @@ import api from "../lib/api";
 import { fmtDate, ROLE_EMOJI, ROLE_COLOR, STATUS_LABEL } from "../lib/constants";
 import { Search, Bell as BellIcon } from "lucide-react";
 import JobDetailModal from "../components/JobDetailModal";
-
-const TEAM_FILTERS = [
-  { key: "all", label: "Everyone", emoji: "👥" },
-  { key: "arjun", label: "Arjun", emoji: "✍️" },
-  { key: "priya", label: "Priya", emoji: "🎨" },
-  { key: "kavya", label: "Kavya", emoji: "📊" },
-  { key: "rohan", label: "Rohan", emoji: "💻" },
-  { key: "meera", label: "Meera", emoji: "🤝" },
-  { key: "yusuf", label: "Yusuf", emoji: "👔" },
-];
+import { useAuth } from "../lib/auth";
+import { hasFullJobAccess } from "../lib/tabs";
 
 export default function Jobs() {
+  const { user } = useAuth();
+  const fullAccess = hasFullJobAccess(user);
   const [jobs, setJobs] = useState([]);
   const [clients, setClients] = useState([]);
   const [users, setUsers] = useState([]);
@@ -47,12 +41,12 @@ export default function Jobs() {
     <div className="space-y-5" data-testid="jobs-page">
       <div>
         <div className="text-[11px] uppercase mono tracking-widest text-slate-500">Work</div>
-        <h1 className="text-2xl font-semibold text-slate-900 mt-1">All Jobs</h1>
+        <h1 className="text-2xl font-semibold text-slate-900 mt-1" data-testid="jobs-heading">{fullAccess ? "All Jobs" : "Your Jobs"}</h1>
       </div>
 
-      {/* Team filter pills */}
+      {fullAccess && (
       <div className="card-surface p-3 flex flex-wrap gap-2 sticky top-[54px] z-10">
-        {TEAM_FILTERS.map(t => (
+        {[{ key: "all", label: "Everyone", emoji: "👥" }, ...users.map(u => ({ key: u.id, label: u.name, emoji: ROLE_EMOJI[u.role_key] || "👤" }))].map(t => (
           <button
             key={t.key}
             onClick={() => setTeam(t.key)}
@@ -63,6 +57,7 @@ export default function Jobs() {
           </button>
         ))}
       </div>
+      )}
 
       {/* Filters */}
       <div className="card-surface p-4 flex flex-wrap gap-3">
@@ -136,7 +131,7 @@ export default function Jobs() {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} className="text-center py-10 text-slate-400 text-sm">No jobs match.</td></tr>
+              <tr><td colSpan={8} className="text-center py-10 text-slate-400 text-sm" data-testid="jobs-empty">{jobs.length === 0 && !fullAccess ? "No jobs assigned to you yet." : "No jobs match."}</td></tr>
             )}
           </tbody>
         </table>

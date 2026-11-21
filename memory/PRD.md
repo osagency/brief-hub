@@ -36,6 +36,29 @@ Internal agency operations tool for **Openspace** (osagency.in), a Mumbai digita
 - **`EmptyState` component** — friendly shared empty state (gradient icon + copy), applied to My Day.
 - **AI Manager Digest** — `GET /api/ai/manager-digest` (admin only). Claude Sonnet 4.5 reads last-7-day aggregate stats (done/overdue/pending approvals/top-loaded person/top client/silent clients/scope flags/@mentions) and writes a 5-bullet Monday briefing with 🔥⚠️🚨✨🎯 markers. Cached in Mongo per ISO week (`manager_digests` collection); Refresh button regenerates. Deterministic fallback if AI errors.
 
+## What's Been Implemented (Feb 2026 — v5 per-user Gmail via Workspace DWD) — LIVE
+- **Google Workspace Domain-Wide Delegation** is **live and verified**. One service account (`openspace-gmail-sync@openspace-agency-os-509307.iam.gserviceaccount.com`, key at `/app/backend/gmail_sa.json`, path via `GMAIL_SA_FILE` env) impersonates any `@osagency.in` user — zero per-user OAuth consent.
+- **Verified per-user isolation**: Yusuf synced 25 msgs from his inbox (Shikha, Imran, ChatGPT), Rupali synced 25 from hers (Shruti, Ajmal) — **0 messageId overlap**. Full RBAC enforced at API layer; cross-user access returns 404.
+- **Every @osagency.in team member** (Yusuf, Rupali, Kalpesh, Aayush, Ved, Kritika + any future hire added via Manage Team) can now click **Sync Gmail** and pull THEIR own inbox. Non-domain accounts are blocked by `can_sync_for`.
+- **Testing**: iter10 — 15/15 backend + 8/8 frontend (login as 2 different users, independent sync, isolation, mark-as-read-propagation, clear-samples, parse-brief).
+- **Awaiting**: nothing — feature complete.
+
+## What's Been Implemented (Feb 2026 — v5 per-user Gmail via Workspace DWD)
+- **Google Workspace Domain-Wide Delegation** replaces the single-user refresh-token Gmail integration. One service account key (stored at `/app/backend/gmail_sa.json`, path via `GMAIL_SA_FILE` env) silently impersonates any `@osagency.in` user — zero per-user OAuth consent.
+- **Per-user inbox scoping**: every inbox doc now carries `owner_email`. `GET /api/inbox`, `POST /api/inbox/sync`, `/parse-brief`, `/draft-reply`, `/create-job`, `/{id}/read` and `/clear-samples` all filter by `current_user.email`. Guard switched from `manager_only` → `current_user`. Each team member only ever sees + syncs their own Gmail.
+- **Workspace guard**: `can_sync_for(email)` enforces that only `@osagency.in` addresses can hit sync. Non-domain users (e.g. the legacy `osagency6@gmail.com`) are blocked at the API layer.
+- **Smart Inbox sidebar link unlocked for all team members** (dropped `managerOnly: true` on nav + route). Inbox unread badge now computed for every role.
+- **Startup migration**: force `u_yusuf.email = yusuf@osagency.in`, delete all pre-DWD Gmail docs, backfill `owner_email = yusuf@osagency.in` on seeded mock emails (so Yusuf sees the demo until he syncs his real Gmail).
+- **LoginPage** defaults + HINTS updated to `yusuf@osagency.in / manager123`.
+- **Awaiting**: user to complete Google Cloud Service Account + Workspace Admin domain-wide delegation setup, then paste the SA JSON — code will light up with zero further changes.
+
+## What's Been Implemented (Feb 2026 — v4 real Gmail sync)
+- **Gmail OAuth integration in Smart Inbox** — new `gmail_service.py` (google-auth + google-api-python-client). Uses a pre-generated refresh token (via OAuth Playground) stored in `backend/.env` as `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`. Silent access-token refresh, no runtime OAuth flow needed.
+- **New endpoints**: `GET /api/inbox/gmail-status` (configured + last_sync + synced_count), `POST /api/inbox/sync` (pulls last 25 messages, matches sender→client by exact email or domain, upserts idempotently by Gmail messageId), `POST /api/inbox/clear-samples` (removes seeded demo emails once real sync is running). Existing `POST /api/inbox/{id}/read` now also propagates to Gmail for `source=gmail` messages.
+- **Inbox UI**: green "Gmail connected · N synced · last sync 2m ago" status pill, blue **Sync Gmail** button with spinner, **Clear samples** button, mail-icon prefix on real Gmail rows, "Unassigned" pill for senders whose email/domain doesn't match a client. Selecting an unassigned email swaps the AI action bar for an amber warning that instructs the manager to add the sender's domain as a client — Create Brief & Draft Reply are hidden until then, preventing 404s.
+- **Manager admin email migrated**: `u_yusuf` account email changed from `yusuf@osagency.in` → **`osagency6@gmail.com`** (password unchanged: `manager123`). One-time startup migration keeps existing DBs in sync.
+- **Verified**: iter7 15/15 backend + 100% Gmail UI flows (idempotent sync, client matching, unassigned handling, clear-samples, mark-as-read propagation). Live mailbox tested with 11,090 real emails; 25 pulled + rendered successfully.
+
 ## What's Been Implemented (Feb 2026 — v3 festivals + proactive ideas)
 - **Festivals & important dates** — new `festivals` MongoDB collection + full CRUD `/api/festivals` (managers add/edit/delete; everyone reads). Seeded with 26 major Indian festivals + brand-marketing days spanning Feb 2026 → Feb 2027 (Diwali, Holi, Raksha Bandhan, Ganesh Chaturthi, Navratri, Eid, Independence Day, Republic Day, Christmas, Cinema Day, Women's/Mother's/Father's Day, etc.).
 - **Manage Important Dates modal** — right-side drawer on the Content Calendar. Add / edit / delete festivals grouped by month, type-colour coded (Festival / Holiday / Brand day / Other).
@@ -123,6 +146,33 @@ Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_que
 ### P3
 - Chart-heavy KPI history over 6 months
 - Slack integration for standups and deadline pings
+
+## 2026-10-24 — Tab Visibility Manager
+- Default: Time Tracker, Lead Generation, Clients, KPI, Leaves, HR & Culture, AI Assistant, Team Vibes hidden for everyone except yusuf@ and bd@osagency.in
+- New `/tab-visibility` page (Yusuf only, not while impersonating): per-person, per-tab toggles + All/None
+- Hidden tab URLs redirect to /dashboard; empty sidebar sections disappear; View-as reflects member's tabs
+- Backend: `GET /api/settings/tabs/me`, `GET/PUT /api/settings/tabs`; Mongo `settings` doc `tab_visibility.overrides`
+- Known limit: enforced in UI/routes only; underlying data APIs (e.g. /api/clients) still respond
+
+## 2026-10-24 — Job scoping & real data
+- "All Jobs" shows as "Your Jobs" for everyone except yusuf@ and bd@osagency.in (sidebar + page heading)
+- Non-full users see only jobs assigned to them; Yusuf and BD view + edit all jobs (`_has_full_job_access`)
+- Jobs filter pills now list real users (by user id) instead of demo names
+- Deleted 12 demo jobs + 5 TEST_ jobs (and their approvals/timelogs); job/approval/timelog seeding removed; startup `purge_sample_jobs` cleans the same from production on redeploy
+- Job IDs now use max existing number + 1 (no clashes after deletions)
+
+## 2026-10-24 — Smart Inbox auto-sync
+- Platform cron `.emergent/crons.yml` → `POST /api/cron/gmail-sync` every 15 min (prod minimum; user chose 15 over 10)
+- Bearer `WEBHOOK_CRON_SECRET` (backend/.env), idempotent via `cron_runs.run_id`, work runs in background task for every @osagency.in user
+- Known: kalpesh@ and aayush@ return Google "Invalid email or User ID" (no Workspace mailbox) — skipped, others sync
+
+## 2026-10-24 — Content Calendar cleanup & 3-year dates
+- Removed 6 TEST_topic posts and 2 duplicate "(declared)" holidays
+- Added 2027–2029 important dates (festivals, holidays, brand days; 99 total through Dec 2029) via idempotent startup `apply_calendar_updates` (also applies to production on redeploy)
+- Cinema Day (India) not repeated for future years (date varies); Eid dates are moon-sighting estimates
+
+## 2026-10-25 — GitHub push fix
+- Moved Google service-account key from `backend/gmail_sa.json` into `GMAIL_SA_JSON` env secret; file deleted + gitignored. Gmail sync verified working after the change.
 
 ## Credentials
 See `/app/memory/test_credentials.md`.

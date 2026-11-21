@@ -24,3 +24,10 @@ services:
         sync: false
       - key: CORS_ORIGINS
         value: https://huzefa.test.osagency.in
+      # Gmail sync (optional) — set in the Render dashboard, not here.
+      - key: GMAIL_SA_JSON
+        sync: false
+      - key: WEBHOOK_CRON_SECRET
+        sync: false
+      - key: GMAIL_SYNC_INTERVAL_MINUTES
+        value: "15"

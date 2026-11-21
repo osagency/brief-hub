@@ -1,6 +1,10 @@
 """Openspace Agency OS — FastAPI backend."""
 import os
 import re
+import hmac
+import time
+import asyncio
+import contextlib
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
@@ -10,7 +14,7 @@ from typing import Optional, List, Dict, Any
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, UploadFile, File, Query, Request
 from fastapi.responses import Response
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -21,6 +25,7 @@ import ai_service
 import storage_service
 import hr_service
 import leads_service
+import gmail_service
 
 
 ROOT_DIR = Path(__file__).parent
@@ -558,8 +563,21 @@ async def delete_client(client_id: str, _: dict = Depends(manager_only)):
 
 # ---------- jobs ----------
 
+JOB_FULL_ACCESS_EMAILS = {"yusuf@osagency.in", "bd@osagency.in"}
+
+
+def _has_full_job_access(user: dict) -> bool:
+    return bool(user.get("is_admin")) or (user.get("email") or "").lower() in JOB_FULL_ACCESS_EMAILS
+
+
+async def _next_job_id() -> str:
+    ids = await db.jobs.distinct("id")
+    nums = [int(i[3:]) for i in ids if isinstance(i, str) and i.startswith("OS-") and i[3:].isdigit()]
+    return f"OS-{max(nums, default=0) + 1:03d}"
+
+
 def _apply_role_filter(query: dict, user: dict) -> dict:
-    if user.get("is_admin"):
+    if _has_full_job_access(user):
         return query
     query["assignees"] = user["id"]
     return query
@@ -569,11 +587,8 @@ def _apply_role_filter(query: dict, user: dict) -> dict:
 async def list_jobs(user: dict = Depends(current_user), assignee: Optional[str] = None):
     q: dict = {}
     q = _apply_role_filter(q, user)
-    if assignee and user.get("is_admin"):
-        if assignee == "yusuf":
-            q["assignees"] = "u_yusuf"
-        else:
-            q["assignees"] = f"u_{assignee}"
+    if assignee and _has_full_job_access(user):
+        q["assignees"] = assignee
     docs = await db.jobs.find(q).sort("createdAt", -1).to_list(500)
     return _clean_list(docs)
 
@@ -603,8 +618,7 @@ async def patch_job(job_id: str, patch: JobPatch, user: dict = Depends(current_u
 
 @api.post("/jobs")
 async def create_job(data: JobCreate, _: dict = Depends(manager_only)):
-    count = await db.jobs.count_documents({})
-    new_id = f"OS-{count+1:03d}"
+    new_id = await _next_job_id()
     doc = {
         "id": new_id,
         "title": data.title,
@@ -891,19 +905,206 @@ async def global_search(q: str, user: dict = Depends(current_user)):
 # ---------- inbox ----------
 
 @api.get("/inbox")
-async def list_inbox(_: dict = Depends(manager_only)):
-    return _clean_list(await db.inbox.find({}).sort("time", -1).to_list(200))
+async def list_inbox(user: dict = Depends(current_user)):
+    """Each user sees only their own inbox messages."""
+    return _clean_list(await db.inbox.find({"owner_email": user["email"]}).sort("time", -1).to_list(200))
 
 
 @api.post("/inbox/{email_id}/read")
-async def mark_read(email_id: str, _: dict = Depends(manager_only)):
+async def mark_read(email_id: str, user: dict = Depends(current_user)):
+    doc = await db.inbox.find_one({"id": email_id, "owner_email": user["email"]}, {"_id": 0, "messageId": 1, "source": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Email not found")
     await db.inbox.update_one({"id": email_id}, {"$set": {"read": True}})
+    if doc.get("source") == "gmail" and doc.get("messageId"):
+        gmail_service.mark_as_read(user["email"], doc["messageId"])
     return {"ok": True}
 
 
+@api.get("/inbox/gmail-status")
+async def gmail_status(user: dict = Depends(current_user)):
+    sa_ok = gmail_service.is_configured()
+    can_sync = gmail_service.can_sync_for(user["email"])
+    last_sync = await db.system_meta.find_one({"key": f"gmail_last_sync:{user['email']}"}, {"_id": 0})
+    return {
+        "configured": can_sync,
+        "sa_present": sa_ok,
+        "user_email": user["email"],
+        "domain_ok": "@" in user["email"] and user["email"].split("@", 1)[1].lower() == gmail_service.WORKSPACE_DOMAIN,
+        "last_sync": (last_sync or {}).get("value"),
+        "synced_count": await db.inbox.count_documents({"source": "gmail", "owner_email": user["email"]}),
+    }
+
+
+@api.post("/inbox/sync")
+async def sync_gmail(user: dict = Depends(current_user)):
+    if not gmail_service.is_configured():
+        raise HTTPException(status_code=400, detail="Google Workspace service account not configured yet. Ask your admin to upload the SA key.")
+    if not gmail_service.can_sync_for(user["email"]):
+        raise HTTPException(status_code=400, detail=f"Only @{gmail_service.WORKSPACE_DOMAIN} users can sync Gmail via Workspace delegation.")
+    result = await _sync_gmail_for(user)
+    if result is None:
+        raise HTTPException(status_code=502, detail="Fetched 0 messages. Check that domain-wide delegation is granted for this service account + the required scopes.")
+    return result
+
+
+async def _sync_gmail_for(user: dict) -> Optional[dict]:
+    messages = await asyncio.to_thread(gmail_service.fetch_recent_messages, user_email=user["email"], max_results=25)
+    if not messages:
+        return None
+    clients = await db.clients.find({}, {"_id": 0}).to_list(200)
+    new_count = 0
+    updated_count = 0
+    for m in messages:
+        client_id = gmail_service.match_client(m.get("from", ""), clients)
+        existing = await db.inbox.find_one({"messageId": m["messageId"], "owner_email": user["email"]}, {"_id": 0, "id": 1, "read": 1})
+        if existing:
+            await db.inbox.update_one({"id": existing["id"]}, {"$set": {
+                "from": m["from"], "senderName": m["senderName"],
+                "subject": m["subject"], "body": m["body"], "preview": m["preview"],
+                "time": m["time"], "clientId": client_id,
+                "source": "gmail",
+                "read": existing.get("read", False) or m["read"],
+            }})
+            updated_count += 1
+        else:
+            new_id = f"gm-{user['id']}-{m['messageId'][:12]}"
+            await db.inbox.insert_one({
+                "id": new_id,
+                "messageId": m["messageId"],
+                "threadId": m.get("threadId"),
+                "source": "gmail",
+                "owner_email": user["email"],
+                "owner_id": user["id"],
+                "from": m["from"], "senderName": m["senderName"],
+                "clientId": client_id,
+                "subject": m["subject"], "preview": m["preview"], "body": m["body"],
+                "time": m["time"], "read": m["read"],
+                "jobCreated": False, "starred": False,
+            })
+            new_count += 1
+    await db.system_meta.update_one(
+        {"key": f"gmail_last_sync:{user['email']}"},
+        {"$set": {"key": f"gmail_last_sync:{user['email']}", "value": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "new_count": new_count, "updated_count": updated_count, "total_fetched": len(messages)}
+
+
+async def _sync_all_gmail(run_id: str):
+    users = await db.users.find({}, {"_id": 0, "id": 1, "email": 1}).to_list(500)
+    summary = {}
+    for u in users:
+        if not gmail_service.can_sync_for(u.get("email", "")):
+            continue
+        try:
+            r = await _sync_gmail_for(u)
+            summary[u["id"]] = r["new_count"] if r else 0
+        except Exception as e:
+            logger.warning("Auto Gmail sync failed for %s: %s", u["email"], e)
+            summary[u["id"]] = "error"
+    await db.cron_runs.update_one({"run_id": run_id}, {"$set": {"finished_at": _now_iso(), "summary": summary}})
+
+
+# One sync at a time per process. Guards the in-process scheduler and the HTTP
+# cron endpoint against stacking if a sync outlasts the interval.
+_gmail_sync_lock = asyncio.Lock()
+CRON_RUN_RETENTION_DAYS = 7
+
+
+async def _run_gmail_sync(run_id: str):
+    """Run a full sync unless one is already in flight in this process."""
+    if _gmail_sync_lock.locked():
+        await db.cron_runs.update_one(
+            {"run_id": run_id},
+            {"$set": {"finished_at": _now_iso(), "skipped": "previous sync still running"}},
+        )
+        return
+    async with _gmail_sync_lock:
+        await _sync_all_gmail(run_id)
+
+
+def _gmail_sync_interval_minutes() -> int:
+    """GMAIL_SYNC_INTERVAL_MINUTES; unset, 0 or invalid disables the in-process scheduler."""
+    raw = (os.environ.get("GMAIL_SYNC_INTERVAL_MINUTES") or "").strip()
+    if not raw:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("Ignoring invalid GMAIL_SYNC_INTERVAL_MINUTES=%r", raw)
+        return 0
+
+
+def _gmail_run_id(now: float, interval_min: int) -> str:
+    """One id per wall-clock interval."""
+    return f"auto-{int(now // (interval_min * 60))}"
+
+
+async def _gmail_scheduler(interval_min: int):
+    """Sync every interval, aligned to wall-clock boundaries.
+
+    The first tick runs at startup, which catches up after a Render cold start.
+    Claiming the bucketed run_id via upsert makes a restart inside the same
+    interval skip instead of syncing twice. Two instances ticking at the same
+    instant could both win the upsert; a strict guarantee there needs a unique
+    index on cron_runs.run_id. A duplicate sync is harmless, just wasted work.
+    """
+    period = interval_min * 60
+    while True:
+        try:
+            run_id = _gmail_run_id(time.time(), interval_min)
+            claim = await db.cron_runs.update_one(
+                {"run_id": run_id},
+                {"$setOnInsert": {"run_id": run_id, "name": "gmail-sync", "source": "in-process", "started_at": _now_iso()}},
+                upsert=True,
+            )
+            if claim.upserted_id is not None:
+                await _run_gmail_sync(run_id)
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=CRON_RUN_RETENTION_DAYS)).isoformat()
+            await db.cron_runs.delete_many({"started_at": {"$lt": cutoff}})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — one bad tick must not kill the loop
+            logger.warning("Gmail scheduler tick failed: %s", e)
+        await asyncio.sleep(period - (time.time() % period))
+
+
+@api.post("/cron/gmail-sync")
+async def cron_gmail_sync(request: Request, authorization: Optional[str] = Header(None), x_webhook_id: Optional[str] = Header(None)):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    secret = os.environ.get("WEBHOOK_CRON_SECRET")
+    if not secret:
+        raise HTTPException(status_code=503, detail="Cron endpoint not configured")
+    token = authorization.split(" ", 1)[1] if authorization and authorization.lower().startswith("bearer ") else ""
+    if not token or not hmac.compare_digest(token, secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    # A bare POST (what most external schedulers send by default) is valid; only a
+    # non-empty body that is not JSON is rejected.
+    raw = await request.body()
+    try:
+        body = await request.json() if raw.strip() else {}
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid body")
+    run_id = x_webhook_id or (body or {}).get("run_id") or uuid.uuid4().hex
+    if await db.cron_runs.find_one({"run_id": run_id}, {"_id": 1}):
+        return {"ok": True, "duplicate": True}
+    await db.cron_runs.insert_one({"run_id": run_id, "name": "gmail-sync", "started_at": _now_iso()})
+    if gmail_service.is_configured():
+        asyncio.create_task(_run_gmail_sync(run_id))
+    return {"ok": True, "accepted": True}
+
+
+@api.post("/inbox/clear-samples")
+async def clear_inbox_samples(user: dict = Depends(current_user)):
+    """Remove seeded sample emails for the current user."""
+    result = await db.inbox.delete_many({"owner_email": user["email"], "source": {"$ne": "gmail"}})
+    return {"ok": True, "removed": result.deleted_count}
+
+
 @api.post("/inbox/parse-brief")
-async def parse_brief(body: BriefParseIn, _: dict = Depends(manager_only)):
-    email = await db.inbox.find_one({"id": body.emailId}, {"_id": 0})
+async def parse_brief(body: BriefParseIn, user: dict = Depends(current_user)):
+    email = await db.inbox.find_one({"id": body.emailId, "owner_email": user["email"]}, {"_id": 0})
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     client = await db.clients.find_one({"id": email["clientId"]}, {"_id": 0})
@@ -940,8 +1141,8 @@ async def parse_brief(body: BriefParseIn, _: dict = Depends(manager_only)):
 
 
 @api.post("/inbox/draft-reply")
-async def draft_reply_api(body: ReplyDraftIn, _: dict = Depends(manager_only)):
-    email = await db.inbox.find_one({"id": body.emailId}, {"_id": 0})
+async def draft_reply_api(body: ReplyDraftIn, user: dict = Depends(current_user)):
+    email = await db.inbox.find_one({"id": body.emailId, "owner_email": user["email"]}, {"_id": 0})
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
     client = await db.clients.find_one({"id": email["clientId"]}, {"_id": 0})
@@ -961,11 +1162,13 @@ async def draft_reply_api(body: ReplyDraftIn, _: dict = Depends(manager_only)):
 
 
 @api.post("/inbox/create-job")
-async def create_job_from_brief(body: CreateJobFromBriefIn, _: dict = Depends(manager_only)):
+async def create_job_from_brief(body: CreateJobFromBriefIn, user: dict = Depends(current_user)):
+    email = await db.inbox.find_one({"id": body.emailId, "owner_email": user["email"]}, {"_id": 0})
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
     brief = body.brief
     delegation = body.delegation
-    count = await db.jobs.count_documents({})
-    new_id = f"OS-{count+1:03d}"
+    new_id = await _next_job_id()
 
     # map assignee roles → user ids
     role_to_uid = {
@@ -1981,8 +2184,7 @@ async def create_job_from_template(body: UseTemplateIn, _: dict = Depends(manage
     tpl = await db.templates.find_one({"id": body.template_id}, {"_id": 0})
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    count = await db.jobs.count_documents({})
-    new_id = f"OS-{count+1:03d}"
+    new_id = await _next_job_id()
     due = body.due or (datetime.now(timezone.utc) + timedelta(days=tpl.get("default_days", 7))).date().isoformat()
     title = body.title or tpl["title_template"] or tpl["name"]
     doc = {
@@ -2151,18 +2353,37 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await seed_data.seed_if_empty(db)
+    await seed_data.purge_sample_jobs(db)
+    await seed_data.apply_calendar_updates(db)
     # One-time migration: ensure every approval has a public_token
     async for doc in db.approvals.find({"public_token": {"$exists": False}}, {"id": 1}):
         await db.approvals.update_one({"id": doc["id"]}, {"$set": {"public_token": uuid.uuid4().hex[:20]}})
+    # Migrate manager email to the true Workspace address
+    await db.users.update_one({"id": "u_yusuf"}, {"$set": {"email": "yusuf@osagency.in"}})
+    # Delete old osagency6-era Gmail docs (previous single-user sync) BEFORE reassigning owners
+    await db.inbox.delete_many({"source": "gmail", "$or": [{"owner_email": {"$exists": False}}, {"owner_email": "osagency6@gmail.com"}]})
+    # Tag any legacy mock inbox docs (missing owner_email) to Yusuf so they still appear for the demo
+    await db.inbox.update_many({"owner_email": {"$exists": False}}, {"$set": {"owner_email": "yusuf@osagency.in"}})
     try:
         storage_service.init_storage()
     except Exception as e:
         logger.warning(f"Storage init deferred (will retry lazily): {e}")
+    interval = _gmail_sync_interval_minutes()
+    if interval and gmail_service.is_configured():
+        app.state.gmail_scheduler = asyncio.create_task(_gmail_scheduler(interval))
+        logger.info("Gmail auto-sync scheduler started (every %d min).", interval)
+    elif interval:
+        logger.info("GMAIL_SYNC_INTERVAL_MINUTES is set but Gmail is not configured; scheduler not started.")
     logger.info("Seed check complete.")
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    task = getattr(app.state, "gmail_scheduler", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
     mongo_client.close()
 
 
@@ -2745,6 +2966,73 @@ async def leads_maintenance(_: dict = Depends(manager_only)):
                 stale.append(lead["id"])
     return {"resurfaced": resurfaced, "stale_alerts": stale}
 
+
+
+# ---------- tab visibility ----------
+
+TAB_OWNER_EMAIL = "yusuf@osagency.in"
+TAB_KEYS = ["inbox", "notifications", "jobs", "board", "calendar", "approvals", "time",
+            "leads", "clients", "kpi", "leaves", "hr", "sop", "ai", "vibes"]
+DEFAULT_RESTRICTED_TABS = {"time", "leads", "clients", "kpi", "leaves", "hr", "ai", "vibes"}
+DEFAULT_FULL_ACCESS_EMAILS = {TAB_OWNER_EMAIL, "bd@osagency.in"}
+
+
+class TabVisibilityIn(BaseModel):
+    user_id: str
+    visible: Dict[str, bool]
+
+
+async def tab_owner_only(user: dict = Depends(current_user)) -> dict:
+    if user.get("_impersonated_by") or (user.get("email") or "").lower() != TAB_OWNER_EMAIL:
+        raise HTTPException(status_code=403, detail="Only Yusuf can manage tab visibility")
+    return user
+
+
+async def _tab_overrides() -> dict:
+    doc = await db.settings.find_one({"id": "tab_visibility"}, {"_id": 0})
+    return (doc or {}).get("overrides", {})
+
+
+def _visible_tabs(u: dict, overrides: dict) -> Dict[str, bool]:
+    email = (u.get("email") or "").lower()
+    if email == TAB_OWNER_EMAIL:
+        return {k: True for k in TAB_KEYS}
+    full = email in DEFAULT_FULL_ACCESS_EMAILS
+    mine = overrides.get(u["id"], {})
+    return {k: mine.get(k, full or k not in DEFAULT_RESTRICTED_TABS) for k in TAB_KEYS}
+
+
+@api.get("/settings/tabs/me")
+async def my_tab_visibility(user: dict = Depends(current_user)):
+    vis = _visible_tabs(user, await _tab_overrides())
+    return {"hidden": [k for k, v in vis.items() if not v]}
+
+
+@api.get("/settings/tabs")
+async def list_tab_visibility(_: dict = Depends(tab_owner_only)):
+    overrides = await _tab_overrides()
+    users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role_label": 1}).to_list(500)
+    return {
+        "tabs": TAB_KEYS,
+        "users": [{**u, "locked": (u.get("email") or "").lower() == TAB_OWNER_EMAIL,
+                   "visible": _visible_tabs(u, overrides)} for u in users],
+    }
+
+
+@api.put("/settings/tabs")
+async def update_tab_visibility(data: TabVisibilityIn, _: dict = Depends(tab_owner_only)):
+    target = await db.users.find_one({"id": data.user_id}, {"_id": 0, "id": 1, "email": 1})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if (target.get("email") or "").lower() == TAB_OWNER_EMAIL:
+        raise HTTPException(status_code=400, detail="Your own tabs are always visible")
+    clean = {k: bool(v) for k, v in data.visible.items() if k in TAB_KEYS}
+    await db.settings.update_one(
+        {"id": "tab_visibility"},
+        {"$set": {f"overrides.{data.user_id}": clean, "updated_at": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "visible": _visible_tabs(target, {data.user_id: clean})}
 
 
 # Register the api router LAST so all endpoints defined above are included

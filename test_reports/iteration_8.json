@@ -1,0 +1,30 @@
+{
+  "summary": "Verified login-fix bug ticket. Manager email migration (osagency6@gmail.com) works end-to-end. Default prefill + Manager chip + backend regression all pass. Old email yusuf@osagency.in is correctly rejected 401 with visible 'Invalid credentials' error. Gmail smoke intact (synced_count=25). HOWEVER the LoginPage HINTS fix is only PARTIALLY applied — the Writer/Designer chips still reference the never-seeded arjun@osagency.in and priya@osagency.in, both fail 401. Spec required these to be rupali@osagency.in and digital@osagency.in.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "LoginPage HINTS array (/app/frontend/src/pages/LoginPage.jsx lines 8-9)", "issue": "Writer chip still has email 'arjun@osagency.in' and Designer chip still has 'priya@osagency.in' — neither user is seeded, both return 401 'Invalid credentials' when the chip is used. Spec called for {role:'Designer', email:'rupali@osagency.in', pw:'team123'} and {role:'Digital', email:'digital@osagency.in', pw:'team123'}. Manager entry was fixed correctly.", "selector": "[data-testid=demo-writer], [data-testid=demo-designer]", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Click 'Designer' demo chip -> Submit", "issue": "Fails with 'Invalid credentials' because chip fills priya@osagency.in which doesn't exist in seed", "affected_selectors": ["[data-testid=demo-designer]", "[data-testid=login-error]"]},
+      {"flow": "Click 'Writer' demo chip -> Submit", "issue": "Fails with 'Invalid credentials' because chip fills arjun@osagency.in which doesn't exist in seed", "affected_selectors": ["[data-testid=demo-writer]", "[data-testid=login-error]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/backend/tests/test_gmail_inbox.py"],
+  "action_items": [
+    "In /app/frontend/src/pages/LoginPage.jsx replace the HINTS array entries for Writer and Designer with the real seeded team accounts per the review spec, e.g.: {role:'Designer', email:'rupali@osagency.in', pw:'team123'} and {role:'Digital', email:'digital@osagency.in', pw:'team123'}. This will also change the data-testid of the third chip from 'demo-writer' to 'demo-digital'."
+  ],
+  "critical_code_review_comments": [
+    "HINTS array should ideally be derived from a shared seed manifest or fetched from a small /api/demo-accounts endpoint to prevent this class of drift bug when seed emails change.",
+    "The default useState values for email/password embed dev credentials in a production build — consider gating behind NODE_ENV !== 'production' or a debug flag."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "71% (5/7 test cases pass; 2 chip flows fail)"},
+  "test_credentials": "Manager osagency6@gmail.com/manager123, Rupali rupali@osagency.in/team123, Digital digital@osagency.in/team123 — all confirmed working on backend.",
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Only the HINTS array in LoginPage.jsx needs a small edit; after the fix, re-run the two failing chip flows (Designer -> rupali, third chip -> digital) and confirm both navigate to /dashboard. Backend + Gmail already verified in this iteration and iteration_7.",
+  "rca of the issue": "LoginPage.jsx was only partially updated during the manager-email migration. The useState default was fixed to osagency6@gmail.com but the HINTS array still contained the pre-migration Writer/Designer demo emails (arjun@osagency.in, priya@osagency.in) which were never seeded. Reproduction: open /login, click the Designer or Writer demo chip, click Sign in -> 401 'Invalid credentials'. Mitigation: update HINTS entries as described in action_items."
+}
