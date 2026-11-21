@@ -2,7 +2,9 @@
 import os
 import re
 import hmac
+import time
 import asyncio
+import contextlib
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
@@ -1004,15 +1006,84 @@ async def _sync_all_gmail(run_id: str):
     await db.cron_runs.update_one({"run_id": run_id}, {"$set": {"finished_at": _now_iso(), "summary": summary}})
 
 
+# One sync at a time per process. Guards the in-process scheduler and the HTTP
+# cron endpoint against stacking if a sync outlasts the interval.
+_gmail_sync_lock = asyncio.Lock()
+CRON_RUN_RETENTION_DAYS = 7
+
+
+async def _run_gmail_sync(run_id: str):
+    """Run a full sync unless one is already in flight in this process."""
+    if _gmail_sync_lock.locked():
+        await db.cron_runs.update_one(
+            {"run_id": run_id},
+            {"$set": {"finished_at": _now_iso(), "skipped": "previous sync still running"}},
+        )
+        return
+    async with _gmail_sync_lock:
+        await _sync_all_gmail(run_id)
+
+
+def _gmail_sync_interval_minutes() -> int:
+    """GMAIL_SYNC_INTERVAL_MINUTES; unset, 0 or invalid disables the in-process scheduler."""
+    raw = (os.environ.get("GMAIL_SYNC_INTERVAL_MINUTES") or "").strip()
+    if not raw:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("Ignoring invalid GMAIL_SYNC_INTERVAL_MINUTES=%r", raw)
+        return 0
+
+
+def _gmail_run_id(now: float, interval_min: int) -> str:
+    """One id per wall-clock interval."""
+    return f"auto-{int(now // (interval_min * 60))}"
+
+
+async def _gmail_scheduler(interval_min: int):
+    """Sync every interval, aligned to wall-clock boundaries.
+
+    The first tick runs at startup, which catches up after a Render cold start.
+    Claiming the bucketed run_id via upsert makes a restart inside the same
+    interval skip instead of syncing twice. Two instances ticking at the same
+    instant could both win the upsert; a strict guarantee there needs a unique
+    index on cron_runs.run_id. A duplicate sync is harmless, just wasted work.
+    """
+    period = interval_min * 60
+    while True:
+        try:
+            run_id = _gmail_run_id(time.time(), interval_min)
+            claim = await db.cron_runs.update_one(
+                {"run_id": run_id},
+                {"$setOnInsert": {"run_id": run_id, "name": "gmail-sync", "source": "in-process", "started_at": _now_iso()}},
+                upsert=True,
+            )
+            if claim.upserted_id is not None:
+                await _run_gmail_sync(run_id)
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=CRON_RUN_RETENTION_DAYS)).isoformat()
+            await db.cron_runs.delete_many({"started_at": {"$lt": cutoff}})
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — one bad tick must not kill the loop
+            logger.warning("Gmail scheduler tick failed: %s", e)
+        await asyncio.sleep(period - (time.time() % period))
+
+
 @api.post("/cron/gmail-sync")
 async def cron_gmail_sync(request: Request, authorization: Optional[str] = Header(None), x_webhook_id: Optional[str] = Header(None)):
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
-    secret = os.environ["WEBHOOK_CRON_SECRET"]
+    secret = os.environ.get("WEBHOOK_CRON_SECRET")
+    if not secret:
+        raise HTTPException(status_code=503, detail="Cron endpoint not configured")
     token = authorization.split(" ", 1)[1] if authorization and authorization.lower().startswith("bearer ") else ""
     if not token or not hmac.compare_digest(token, secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
+    # A bare POST (what most external schedulers send by default) is valid; only a
+    # non-empty body that is not JSON is rejected.
+    raw = await request.body()
     try:
-        body = await request.json()
+        body = await request.json() if raw.strip() else {}
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid body")
     run_id = x_webhook_id or (body or {}).get("run_id") or uuid.uuid4().hex
@@ -1020,7 +1091,7 @@ async def cron_gmail_sync(request: Request, authorization: Optional[str] = Heade
         return {"ok": True, "duplicate": True}
     await db.cron_runs.insert_one({"run_id": run_id, "name": "gmail-sync", "started_at": _now_iso()})
     if gmail_service.is_configured():
-        asyncio.create_task(_sync_all_gmail(run_id))
+        asyncio.create_task(_run_gmail_sync(run_id))
     return {"ok": True, "accepted": True}
 
 
@@ -2297,11 +2368,22 @@ async def startup():
         storage_service.init_storage()
     except Exception as e:
         logger.warning(f"Storage init deferred (will retry lazily): {e}")
+    interval = _gmail_sync_interval_minutes()
+    if interval and gmail_service.is_configured():
+        app.state.gmail_scheduler = asyncio.create_task(_gmail_scheduler(interval))
+        logger.info("Gmail auto-sync scheduler started (every %d min).", interval)
+    elif interval:
+        logger.info("GMAIL_SYNC_INTERVAL_MINUTES is set but Gmail is not configured; scheduler not started.")
     logger.info("Seed check complete.")
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    task = getattr(app.state, "gmail_scheduler", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
     mongo_client.close()
 
 
