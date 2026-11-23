@@ -19,7 +19,7 @@ function Toggle({ on, disabled, onClick, testid }) {
   );
 }
 
-function UserRow({ u, tabs, onToggle, onAll }) {
+function UserRow({ u, tabs, onToggle, onAll, onCreator }) {
   return (
     <tr className="border-t border-[#E5E8F0]" data-testid={`tab-row-${u.id}`}>
       <td className="sticky left-0 bg-white px-3 py-2 min-w-[180px]">
@@ -33,6 +33,9 @@ function UserRow({ u, tabs, onToggle, onAll }) {
             <button onClick={() => onAll(u, false)} data-testid={`tab-hide-all-${u.id}`} className="text-[10px] text-slate-500 hover:underline flex items-center gap-0.5"><EyeOff size={10} />None</button>
           </div>
         )}
+      </td>
+      <td className="px-2 py-2 text-center bg-amber-50/40">
+        <Toggle on={u.can_create_jobs} disabled={u.locked} onClick={() => onCreator(u)} testid={`job-creator-toggle-${u.id}`} />
       </td>
       {tabs.map(t => (
         <td key={t} className="px-2 py-2 text-center">
@@ -62,26 +65,38 @@ export default function TabManager() {
   };
 
   const onToggle = (u, t) => save(u, { ...u.visible, [t]: !u.visible[t] });
+  const onCreator = async (u) => {
+    const allowed = !u.can_create_jobs;
+    setData(d => ({ ...d, users: d.users.map(x => x.id === u.id ? { ...x, can_create_jobs: allowed } : x) }));
+    try {
+      await api.put("/settings/job-creators", { user_id: u.id, allowed });
+      reload();
+    } catch (e) {
+      setData(d => ({ ...d, users: d.users.map(x => x.id === u.id ? { ...x, can_create_jobs: !allowed } : x) }));
+      toast.error(e?.response?.data?.detail || "Save failed");
+    }
+  };
   const onAll = (u, on) => save(u, Object.fromEntries(data.tabs.map(t => [t, on])));
 
   return (
     <div className="space-y-5" data-testid="tab-manager-page">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Tab Visibility</h1>
-        <p className="text-[13px] text-slate-500 mt-1">Choose which side-panel tabs each team member can see. Changes save instantly; hidden pages can't be opened by link either.</p>
+        <p className="text-[13px] text-slate-500 mt-1">Choose which side-panel tabs each team member can see, and who can create jobs. Changes save instantly; hidden pages can't be opened by link either.</p>
       </div>
       <div className="bg-white border border-[#E5E8F0] rounded-[12px] overflow-x-auto">
         <table className="w-full text-left" data-testid="tab-manager-table">
           <thead className="bg-slate-50">
             <tr>
               <th className="sticky left-0 bg-slate-50 px-3 py-2 text-[10px] uppercase mono tracking-widest text-slate-500">Member</th>
+              <th className="px-2 py-2 text-[10px] uppercase mono tracking-wider text-amber-700 text-center whitespace-nowrap bg-amber-50" data-testid="job-creator-col">Can create jobs</th>
               {data.tabs.map(t => (
                 <th key={t} className="px-2 py-2 text-[10px] uppercase mono tracking-wider text-slate-500 text-center whitespace-nowrap">{TAB_LABELS[t] || t}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {data.users.map(u => <UserRow key={u.id} u={u} tabs={data.tabs} onToggle={onToggle} onAll={onAll} />)}
+            {data.users.map(u => <UserRow key={u.id} u={u} tabs={data.tabs} onToggle={onToggle} onAll={onAll} onCreator={onCreator} />)}
           </tbody>
         </table>
       </div>

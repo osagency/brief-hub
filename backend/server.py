@@ -615,7 +615,16 @@ async def patch_job(job_id: str, patch: JobPatch, user: dict = Depends(current_u
 
 
 @api.post("/jobs")
-async def create_job(data: JobCreate, _: dict = Depends(manager_only)):
+async def create_job(data: JobCreate, user: dict = Depends(current_user)):
+    if not _can_create_jobs(user, (await _tab_settings()).get("job_creators", {})):
+        raise HTTPException(status_code=403, detail="You don't have permission to create jobs")
+    if not data.title.strip() or not data.client.strip():
+        raise HTTPException(status_code=400, detail="Title and client are required")
+    if not user.get("is_admin") and user["id"] not in data.assignees:
+        data.assignees.append(user["id"])
+    if not data.team and data.assignees:
+        members = await db.users.find({"id": {"$in": data.assignees}}, {"_id": 0, "role_key": 1}).to_list(50)
+        data.team = sorted({m["role_key"] for m in members if m.get("role_key")})
     new_id = await _next_job_id()
     doc = {
         "id": new_id,
@@ -2893,6 +2902,23 @@ TAB_KEYS = ["inbox", "notifications", "jobs", "board", "calendar", "approvals", 
             "leads", "clients", "kpi", "leaves", "hr", "sop", "ai", "vibes"]
 DEFAULT_RESTRICTED_TABS = {"time", "leads", "clients", "kpi", "leaves", "hr", "ai", "vibes"}
 DEFAULT_FULL_ACCESS_EMAILS = {TAB_OWNER_EMAIL, "bd@osagency.in"}
+DEFAULT_JOB_CREATOR_EMAILS = {"bd@osagency.in"}
+
+
+class JobCreatorIn(BaseModel):
+    user_id: str
+    allowed: bool
+
+
+async def _tab_settings() -> dict:
+    return await db.settings.find_one({"id": "tab_visibility"}, {"_id": 0}) or {}
+
+
+def _can_create_jobs(u: dict, creators: dict) -> bool:
+    email = (u.get("email") or "").lower()
+    if email == TAB_OWNER_EMAIL or (u.get("is_admin") and not u.get("_impersonated_by")):
+        return True
+    return creators.get(u["id"], email in DEFAULT_JOB_CREATOR_EMAILS)
 
 
 class TabVisibilityIn(BaseModel):
@@ -2907,8 +2933,7 @@ async def tab_owner_only(user: dict = Depends(current_user)) -> dict:
 
 
 async def _tab_overrides() -> dict:
-    doc = await db.settings.find_one({"id": "tab_visibility"}, {"_id": 0})
-    return (doc or {}).get("overrides", {})
+    return (await _tab_settings()).get("overrides", {})
 
 
 def _visible_tabs(u: dict, overrides: dict) -> Dict[str, bool]:
@@ -2922,19 +2947,38 @@ def _visible_tabs(u: dict, overrides: dict) -> Dict[str, bool]:
 
 @api.get("/settings/tabs/me")
 async def my_tab_visibility(user: dict = Depends(current_user)):
-    vis = _visible_tabs(user, await _tab_overrides())
-    return {"hidden": [k for k, v in vis.items() if not v]}
+    s = await _tab_settings()
+    vis = _visible_tabs(user, s.get("overrides", {}))
+    return {"hidden": [k for k, v in vis.items() if not v],
+            "can_create_jobs": _can_create_jobs(user, s.get("job_creators", {}))}
 
 
 @api.get("/settings/tabs")
 async def list_tab_visibility(_: dict = Depends(tab_owner_only)):
-    overrides = await _tab_overrides()
-    users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role_label": 1}).to_list(500)
+    s = await _tab_settings()
+    overrides, creators = s.get("overrides", {}), s.get("job_creators", {})
+    users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role_label": 1, "is_admin": 1}).to_list(500)
     return {
         "tabs": TAB_KEYS,
         "users": [{**u, "locked": (u.get("email") or "").lower() == TAB_OWNER_EMAIL,
-                   "visible": _visible_tabs(u, overrides)} for u in users],
+                   "visible": _visible_tabs(u, overrides),
+                   "can_create_jobs": _can_create_jobs(u, creators)} for u in users],
     }
+
+
+@api.put("/settings/job-creators")
+async def update_job_creator(data: JobCreatorIn, _: dict = Depends(tab_owner_only)):
+    target = await db.users.find_one({"id": data.user_id}, {"_id": 0, "id": 1, "email": 1})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if (target.get("email") or "").lower() == TAB_OWNER_EMAIL:
+        raise HTTPException(status_code=400, detail="You can always create jobs")
+    await db.settings.update_one(
+        {"id": "tab_visibility"},
+        {"$set": {f"job_creators.{data.user_id}": data.allowed, "updated_at": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "allowed": data.allowed}
 
 
 @api.put("/settings/tabs")
