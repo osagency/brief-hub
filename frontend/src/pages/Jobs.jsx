@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 import { fmtDate, ROLE_EMOJI, ROLE_COLOR, STATUS_LABEL } from "../lib/constants";
-import { Search, Bell as BellIcon } from "lucide-react";
+import { Search, Bell as BellIcon, Plus } from "lucide-react";
+import { NewJobDialog } from "../components/NewJobDialog";
 import JobDetailModal from "../components/JobDetailModal";
 import { useAuth } from "../lib/auth";
-import { hasFullJobAccess } from "../lib/tabs";
+import { hasFullJobAccess, useTabs } from "../lib/tabs";
 
 export default function Jobs() {
   const { user } = useAuth();
   const fullAccess = hasFullJobAccess(user);
+  const { canCreateJobs } = useTabs();
+  const [newOpen, setNewOpen] = useState(false);
   const [jobs, setJobs] = useState([]);
   const [clients, setClients] = useState([]);
   const [users, setUsers] = useState([]);
@@ -39,10 +42,19 @@ export default function Jobs() {
 
   return (
     <div className="space-y-5" data-testid="jobs-page">
-      <div>
-        <div className="text-[11px] uppercase mono tracking-widest text-slate-500">Work</div>
-        <h1 className="text-2xl font-semibold text-slate-900 mt-1" data-testid="jobs-heading">{fullAccess ? "All Jobs" : "Your Jobs"}</h1>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase mono tracking-widest text-slate-500">Work</div>
+          <h1 className="text-2xl font-semibold text-slate-900 mt-1" data-testid="jobs-heading">{fullAccess ? "All Jobs" : "Your Jobs"}</h1>
+        </div>
+        {canCreateJobs && (
+          <button onClick={() => setNewOpen(true)} data-testid="new-job-btn"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#4361EE] text-white text-[13px] font-medium hover:bg-[#3451d6] transition-colors">
+            <Plus size={15} /> New Job
+          </button>
+        )}
       </div>
+      <NewJobDialog open={newOpen} onOpenChange={setNewOpen} clients={clients} users={users} onCreated={() => load()} />
 
       {fullAccess && (
       <div className="card-surface p-3 flex flex-wrap gap-2 sticky top-[54px] z-10">

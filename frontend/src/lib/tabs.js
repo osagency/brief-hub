@@ -15,11 +15,12 @@ export const TAB_LABELS = {
   sop: "SOP Library", ai: "AI Assistant", vibes: "Team Vibes",
 };
 
-const TabsCtx = createContext({ hidden: new Set(), ready: false, reload: () => {} });
+const TabsCtx = createContext({ hidden: new Set(), canCreateJobs: false, ready: false, reload: () => {} });
 
 export function TabsProvider({ children }) {
   const { user } = useAuth();
   const [hidden, setHidden] = useState(new Set());
+  const [canCreateJobs, setCanCreateJobs] = useState(false);
   const [ready, setReady] = useState(false);
 
   const reload = useCallback(async () => {
@@ -27,6 +28,7 @@ export function TabsProvider({ children }) {
     try {
       const { data } = await api.get("/settings/tabs/me");
       setHidden(new Set(data.hidden));
+      setCanCreateJobs(!!data.can_create_jobs);
     } catch (e) {
       console.warn("Tab visibility load failed:", e?.message);
     }
@@ -35,7 +37,7 @@ export function TabsProvider({ children }) {
 
   useEffect(() => { setReady(false); reload(); }, [user?.id, reload]);
 
-  return React.createElement(TabsCtx.Provider, { value: { hidden, ready, reload } }, children);
+  return React.createElement(TabsCtx.Provider, { value: { hidden, canCreateJobs, ready, reload } }, children);
 }
 
 export const useTabs = () => useContext(TabsCtx);

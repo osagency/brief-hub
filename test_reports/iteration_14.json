@@ -1,0 +1,37 @@
+{
+  "summary": "Tested creating jobs by hand and the 'Can create jobs' permission end to end (backend + UI). All 12 new backend tests pass, the regression suites pass (test_tab_visibility + test_job_scoping: 27 passed, 1 skipped), and every UI flow requested works: Yusuf and BD create jobs; empty title or client shows an error toast and creates nothing; BD's own chip is locked and she is added to assignees; Rupali gets no button and a 403 by default; turning the toggle on gives her the button after login; she can create a job assigned only to Ved and is still added; turning it off hides the button and brings back the 403. The only problems found are missing input checks on POST /api/jobs and a few code-quality items.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/jobs", "issue": "No input checks beyond title/client being non-empty. Verified: client='no_such_client', priority='bogus', due='not-a-date', assignees=['u_ghost'] were all accepted (200, job saved). Should check the client exists, the priority is one of low/medium/high/urgent, the due date is ISO, and the assignees are real users."},
+      {"endpoint": "POST /api/jobs (_next_job_id)", "issue": "The id is max(existing)+1, so once the newest job is deleted its OS-0xx id is handed out again (seen: OS-019 was reused after deletion). Two creates at the same moment can also get the same id because there is no unique index or atomic counter."},
+      {"endpoint": "server.py class JobCreate (line ~117)", "issue": "All the fields are declared twice in the class body (copy-paste). Harmless at runtime but should be cleaned up."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "NewJobDialog", "issues": ["Due date uses the browser's native <input type=date> instead of the shadcn Calendar/Popover used elsewhere", "Client and priority use native <select>s (they work, but don't match the shadcn style)"]},
+      {"screen": "TabManager toggles", "issues": ["Toggles have no role='switch' or aria-checked (accessibility)", "No toast when the job-creator toggle saves successfully (only rolls back on error). Acceptable, since the page says changes save instantly."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_job_creation.py", "/app/test_reports/pytest/pytest_job_creation.xml"],
+  "action_items": [
+    "Add checks on JobCreate: client must exist, priority must be an allowed value, due must be an ISO date, unknown assignee ids rejected or dropped",
+    "Use an atomic counter (or a unique index on jobs.id plus retry) instead of max+1 for OS-0xx ids",
+    "Remove the duplicated fields in the JobCreate model",
+    "Optional: switch the New Job due-date field to the shadcn Calendar"
+  ],
+  "critical_code_review_comments": [
+    "_can_create_jobs: admins can always create unless they are viewing the app as another user. That is correct, but it relies on is_admin, while the Tab Visibility owner check relies on email. The two rules are consistent today but could drift apart.",
+    "On the frontend the locked chip is shown as selected for non-admins, but the locked user's id is not in f.assignees; the backend adds it. That works, but the payload and the UI disagree.",
+    "server.py is ~3000 lines and should be split into routers."
+  ],
+  "updated_files": ["/app/backend/tests/test_job_creation.py"],
+  "success_rate": {"backend": "100% (12/12 new + 27/27 regression)", "frontend": "100% of requested flows"},
+  "seed_data_creation": "Created test jobs OS-019..OS-022 (API) and OS-019..OS-021 (UI), all titled TEST_*; each was deleted by its id. job_creators was $unset and tab_visibility.updated_at was restored to its original value. The DB now holds only OS-018, which was not touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Ved's login is digital@osagency.in (not ved@). Before testing, tab_visibility had no job_creators key, so the defaults apply (BD on, Rupali off). test_job_creation.py writes the ids it creates to /tmp/created_jobs.txt and puts Rupali's toggle back to off when it finishes; delete the created jobs by id afterwards. Log out in the UI by clearing localStorage."
+}
