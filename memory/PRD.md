@@ -174,6 +174,12 @@ Backend collections: `leads`, `lead_touches`, `lead_settings`, `lead_nurture_que
 ## 2026-10-25 — GitHub push fix
 - Moved Google service-account key from `backend/gmail_sa.json` into `GMAIL_SA_JSON` env secret; file deleted + gitignored. Gmail sync verified working after the change.
 
+## 2026-11-23 — Manual job creation + permission
+- "New Job" button + dialog on /jobs (title, client, priority, due, description, assignees)
+- "Can create jobs" column on Tab Visibility (Yusuf only); defaults: Yusuf always, BD on, others off (`settings.tab_visibility.job_creators`)
+- Non-admin creators are always added to the job's assignees; POST /api/jobs validates client, priority, due date, assignees
+- Endpoints: PUT /api/settings/job-creators; /settings/tabs/me returns can_create_jobs
+
 ## Credentials
 See `/app/memory/test_credentials.md`.
 

@@ -124,15 +124,6 @@ class JobCreate(BaseModel):
     desc: str = ""
     recurring: str = "none"
     status: str = "todo"
-    title: str
-    client: str
-    priority: str = "medium"
-    due: Optional[str] = None
-    team: list[str] = []
-    assignees: list[str] = []
-    desc: str = ""
-    recurring: str = "none"
-    status: str = "todo"
 
 
 class KPIIn(BaseModel):
@@ -620,6 +611,17 @@ async def create_job(data: JobCreate, user: dict = Depends(current_user)):
         raise HTTPException(status_code=403, detail="You don't have permission to create jobs")
     if not data.title.strip() or not data.client.strip():
         raise HTTPException(status_code=400, detail="Title and client are required")
+    if data.priority not in {"low", "medium", "high", "urgent"}:
+        raise HTTPException(status_code=400, detail="Invalid priority")
+    if data.due:
+        try:
+            datetime.fromisoformat(data.due)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid due date")
+    if not await db.clients.find_one({"id": data.client}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Unknown client")
+    if data.assignees and await db.users.count_documents({"id": {"$in": data.assignees}}) != len(set(data.assignees)):
+        raise HTTPException(status_code=400, detail="Unknown assignee")
     if not user.get("is_admin") and user["id"] not in data.assignees:
         data.assignees.append(user["id"])
     if not data.team and data.assignees:
